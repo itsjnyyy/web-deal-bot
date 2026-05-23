@@ -1,0 +1,11 @@
+# Never commit your real credentials
+config.json
+
+# SQLite database (rebuilds itself automatically)
+deals_seen.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env

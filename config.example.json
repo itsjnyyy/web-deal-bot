@@ -1,0 +1,7 @@
+{
+  "discord_token":        "PASTE_YOUR_DISCORD_BOT_TOKEN_HERE",
+  "channel_id":           "PASTE_YOUR_CHANNEL_ID_HERE",
+  "keepa_api_key":        "PASTE_YOUR_KEEPA_API_KEY_HERE",
+  "min_discount_percent": 40,
+  "check_interval_hours": 2
+}
