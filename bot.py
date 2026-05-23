@@ -52,7 +52,12 @@ def get_config(key, default=None):
         return default
 
 DISCORD_TOKEN    = get_config("DISCORD_TOKEN")
-CHANNEL_ID       = int(get_config("CHANNEL_ID", 0))
+# Supports one or multiple channels: "123" or "123,456,789"
+CHANNEL_IDS = [
+    int(cid.strip())
+    for cid in get_config("CHANNEL_ID", "0").split(",")
+    if cid.strip().isdigit()
+]
 MIN_DISCOUNT_PCT = int(get_config("MIN_DISCOUNT_PERCENT", 40))
 CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
@@ -293,9 +298,10 @@ bot = DealBot()
 async def run_scan() -> int:
     """Scrapes Amazon, posts new deals to the channel. Returns count of new deals posted."""
     log.info("Starting deal scan...")
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel is None:
-        log.error(f"Channel {CHANNEL_ID} not found")
+    channels = [bot.get_channel(cid) for cid in CHANNEL_IDS]
+    channels = [c for c in channels if c is not None]
+    if not channels:
+        log.error(f"No valid channels found from CHANNEL_ID config")
         return 0
 
     deals  = await scrape_amazon_deals()
@@ -304,12 +310,14 @@ async def run_scan() -> int:
     for deal in sorted(deals, key=lambda d: d["discount_pct"], reverse=True):
         if already_alerted(deal["deal_id"], deal["price"]):
             continue
-        await channel.send(embed=build_embed(deal))
+        for channel in channels:
+            await channel.send(embed=build_embed(deal))
+            await asyncio.sleep(0.5)
         record_deal(deal["deal_id"], deal["title"], deal["price"], deal["discount_pct"])
         posted += 1
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1.0)
 
-    log.info(f"Done — posted {posted} new deal(s).")
+    log.info(f"Done — posted {posted} new deal(s) to {len(channels)} channel(s).")
     return posted
 
 # ── Background scan loop ──────────────────────────────────────────────────────
@@ -380,9 +388,10 @@ async def on_ready():
     db_init()
     deal_loop.start()
     log.info(f"Logged in as {bot.user}  |  Min {MIN_DISCOUNT_PCT}% off  |  Every {CHECK_HOURS}h")
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        await channel.send(
+    for _cid in CHANNEL_IDS:
+        channel = bot.get_channel(_cid)
+        if channel:
+            await channel.send(
             f"🤖 **Amazon Gaming Deal Monitor online!**\n"
             f"Scanning Amazon deals every **{CHECK_HOURS}h** for name-brand items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
             f"Use `/check` to scan now, `/stats` to see tracked deals."
