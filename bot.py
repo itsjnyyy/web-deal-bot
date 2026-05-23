@@ -10,12 +10,27 @@ import logging
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime
 
 import discord
 from discord import app_commands
 from discord.ext import tasks
 from playwright.async_api import async_playwright
+
+# ── Install Chromium at runtime (required on Railway) ─────────────────────────
+print("Installing Playwright Chromium browser...", flush=True)
+_install = subprocess.run(
+    [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+    capture_output=False,
+)
+if _install.returncode != 0:
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        capture_output=False,
+    )
+print("Chromium ready.", flush=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
