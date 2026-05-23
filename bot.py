@@ -308,36 +308,56 @@ async def before_loop():
 
 # ── Slash commands ────────────────────────────────────────────────────────────
 @bot.tree.command(name="check", description="Force an immediate Amazon deal scan")
-@app_commands.checks.has_permissions(manage_messages=True)
 async def slash_check(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 Scanning Amazon for deals, this may take a minute...")
-    posted = await run_scan()
-    if posted == 0:
-        await interaction.followup.send("😴 No new deals found right now that are ≥ **40% off** from a name brand. Try again later!")
-    else:
-        await interaction.followup.send(f"✅ Done! Found and posted **{posted}** new deal(s) above.")
+    await interaction.response.send_message("🔍 Scanning Amazon for deals, this may take up to a minute...")
+    try:
+        posted = await run_scan()
+        if posted == 0:
+            await interaction.followup.send(
+                "😴 No new deals found right now that are ≥ **40% off** from a name brand. Try again later!"
+            )
+        else:
+            await interaction.followup.send(
+                f"✅ Done! Found and posted **{posted}** new deal(s) above."
+            )
+    except Exception as e:
+        log.error(f"/check error: {e}")
+        await interaction.followup.send(f"❌ Something went wrong during the scan: `{e}`")
 
 @bot.tree.command(name="stats", description="Show how many deals have been tracked")
 async def slash_stats(interaction: discord.Interaction):
-    with sqlite3.connect(DB_FILE) as conn:
-        total  = conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0]
-        recent = conn.execute(
-            "SELECT title, discount, alerted_at FROM deals ORDER BY alerted_at DESC LIMIT 5"
-        ).fetchall()
-    embed = discord.Embed(title="📊 Deal Monitor Stats", color=discord.Color.blurple())
-    embed.add_field(name="Total Deals Tracked", value=str(total), inline=False)
-    if recent:
-        lines = "\n".join(f"• **{r[1]}%** off — {r[0][:55]}…" for r in recent)
-        embed.add_field(name="5 Most Recent", value=lines, inline=False)
-    await interaction.response.send_message(embed=embed)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            total  = conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0]
+            recent = conn.execute(
+                "SELECT title, discount, alerted_at FROM deals ORDER BY alerted_at DESC LIMIT 5"
+            ).fetchall()
+        embed = discord.Embed(title="📊 Deal Monitor Stats", color=discord.Color.blurple())
+        embed.add_field(name="Total Deals Tracked", value=str(total), inline=False)
+        if recent:
+            lines = "\n".join(f"• **{r[1]}%** off — {r[0][:55]}…" for r in recent)
+            embed.add_field(name="5 Most Recent", value=lines, inline=False)
+        await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        log.error(f"/stats error: {e}")
+        await interaction.response.send_message(f"❌ Error fetching stats: `{e}`")
 
 @bot.tree.command(name="help", description="Show available bot commands")
 async def slash_help(interaction: discord.Interaction):
     embed = discord.Embed(title="🎮 Gaming Deal Bot Commands", color=discord.Color.green())
-    embed.add_field(name="/check", value="Force a deal scan right now *(mod only)*", inline=False)
-    embed.add_field(name="/stats", value="Show total deals tracked + recent alerts",  inline=False)
-    embed.add_field(name="/help",  value="Show this help message",                    inline=False)
+    embed.add_field(name="/check", value="Force a deal scan right now",                inline=False)
+    embed.add_field(name="/stats", value="Show total deals tracked + recent alerts",   inline=False)
+    embed.add_field(name="/help",  value="Show this help message",                     inline=False)
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    log.error(f"Slash command error: {error}")
+    msg = f"❌ Error: `{error}`"
+    if interaction.response.is_done():
+        await interaction.followup.send(msg)
+    else:
+        await interaction.response.send_message(msg)
 
 # ── Events ────────────────────────────────────────────────────────────────────
 @bot.event
