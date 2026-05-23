@@ -1,18 +1,20 @@
 """
-Amazon Gaming Deal Monitor — Discord Bot
-Polls the Keepa Deal Finder API every N hours and posts any name-brand gaming
-component that has dropped ≥ MIN_DISCOUNT_PCT off its 90-day average.
+Amazon Gaming Deal Monitor — Discord Bot (Free Version)
+Uses Playwright to scrape Amazon's Today's Deals page.
+No API key required.
 """
 
 import asyncio
 import json
 import logging
+import os
+import re
 import sqlite3
 from datetime import datetime
 
 import discord
-import requests
 from discord.ext import commands, tasks
+from playwright.async_api import async_playwright
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -22,208 +24,252 @@ logging.basicConfig(
 )
 log = logging.getLogger("deal-bot")
 
-# ── Config ────────────────────────────────────────────────────────────────────
-with open("config.json") as f:
-    config = json.load(f)
+# ── Config (reads from environment variables on Railway, or config.json locally)
+def get_config(key, default=None):
+    val = os.environ.get(key)
+    if val:
+        return val
+    try:
+        with open("config.json") as f:
+            return json.load(f).get(key, default)
+    except FileNotFoundError:
+        return default
 
-DISCORD_TOKEN    = config["discord_token"]
-CHANNEL_ID       = int(config["channel_id"])
-KEEPA_API_KEY    = config["keepa_api_key"]
-MIN_DISCOUNT_PCT = config.get("min_discount_percent", 40)
-CHECK_HOURS      = config.get("check_interval_hours", 2)
+DISCORD_TOKEN    = get_config("DISCORD_TOKEN")
+CHANNEL_ID       = int(get_config("CHANNEL_ID", 0))
+MIN_DISCOUNT_PCT = int(get_config("MIN_DISCOUNT_PERCENT", 40))
+CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
-# ── Name-brand gaming filter ──────────────────────────────────────────────────
-# Deals must contain at least one of these brand names (case-insensitive).
-GAMING_BRANDS = [
-    # Peripherals
-    "logitech", "razer", "corsair", "steelseries", "hyperx", "roccat",
-    "glorious", "ducky", "keychron", "elgato", "astro", "sennheiser",
-    # GPUs / AIBs
-    "evga", "zotac", "sapphire", "xfx", "powercolor", "msi", "gigabyte",
-    "asus rog", "asus tuf", "asus dual", "asus prime",
-    # Monitors
-    "lg ultragear", "lg ultranano", "benq", "aoc", "viewsonic",
-    "alienware", "samsung odyssey", "asus rog swift", "msi optix",
-    # Systems / Laptops
-    "acer predator", "acer nitro", "hp omen", "dell g-series",
-    # Storage
-    "samsung 970", "samsung 980", "samsung 990", "wd black", "seagate barracuda",
-    "seagate firecuda", "crucial p5", "crucial p3", "kingston fury",
-    # Memory
-    "g.skill", "corsair vengeance", "crucial ballistix",
-    # Cooling / Cases
-    "nzxt", "cooler master", "thermaltake", "be quiet", "fractal design",
-    "lian li", "phanteks",
-    # CPUs / Boards (popular retail combos)
-    "amd ryzen", "intel core i", "asrock", "msi mpg", "msi mag",
-    # Headsets
-    "steelseries arctis", "razer blackshark", "corsair virtuoso",
-    "hyperx cloud", "logitech g pro", "logitech g435",
+# ── Amazon deal category URLs to scan ─────────────────────────────────────────
+# These are Amazon's Today's Deals pages filtered by gaming/computer categories
+DEAL_URLS = [
+    # PC Gaming
+    "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22viewIndex%22%3A0%2C%22presetId%22%3A%22deals-collection-all-deals%22%2C%22sorting%22%3A%22BY_SCORE%22%7D&ref=s9_acss_bw_cg_GBNavN_3a1_w",
+    # Electronics Deals
+    "https://www.amazon.com/gp/goldbox?deals-widget=%7B%22version%22%3A1%2C%22viewIndex%22%3A0%2C%22presetId%22%3A%22deals-collection-all-deals%22%7D",
 ]
 
-# ── Keepa category IDs for Amazon.com ────────────────────────────────────────
-# https://www.keepa.com/#!categorytree
-CATEGORIES = {
-    "Computers & Accessories":      284822,
-    "Computer Components":          193870011,
-    "Gaming Keyboards & Mice":      1232597011,
-    "PC Gaming":                    2407749011,
-    "Gaming Headsets":              3012290011,
-    "Gaming Controllers":           402053011,
-    "Computer Monitors":            1292115011,
-    "Computer Cases":               1292110011,
-    "CPU Processors":               229189,
-    "Graphics Cards":               284823,
-    "Internal SSDs":                1292116011,
-    "RAM":                          172500,
-    "PC Gaming Chairs":             4616531011,
-}
+# ── Gaming brand filter ────────────────────────────────────────────────────────
+GAMING_BRANDS = [
+    "logitech", "razer", "corsair", "steelseries", "hyperx", "roccat",
+    "glorious", "ducky", "keychron", "elgato", "astro", "sennheiser",
+    "evga", "zotac", "sapphire", "xfx", "powercolor", "msi", "gigabyte",
+    "asus rog", "asus tuf", "asus dual", "asus prime", "asus",
+    "lg ultragear", "benq", "aoc", "viewsonic", "alienware",
+    "samsung odyssey", "samsung 970", "samsung 980", "samsung 990",
+    "acer predator", "acer nitro", "hp omen",
+    "wd black", "seagate", "crucial", "kingston", "g.skill",
+    "nzxt", "cooler master", "thermaltake", "be quiet", "fractal design",
+    "lian li", "phanteks", "deepcool",
+    "amd ryzen", "intel core", "asrock",
+    "rtx", "gtx", "rx 6", "rx 7", "geforce", "radeon",
+    "steelseries arctis", "razer blackshark", "corsair virtuoso",
+    "hyperx cloud", "logitech g pro",
+]
+
+def is_gaming_brand(title: str) -> bool:
+    t = title.lower()
+    return any(brand in t for brand in GAMING_BRANDS)
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_FILE = "deals_seen.db"
-
 
 def db_init():
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS deals (
-                asin        TEXT PRIMARY KEY,
+                deal_id     TEXT PRIMARY KEY,
                 title       TEXT,
-                price_cents INTEGER,
+                price       REAL,
                 discount    INTEGER,
                 alerted_at  TEXT
             )
         """)
 
-
-def already_alerted(asin: str, price_cents: int) -> bool:
-    """
-    Returns True if we sent this ASIN before at a price within 5% of current.
-    Allows re-alerting if the price drops significantly further.
-    """
+def already_alerted(deal_id: str, price: float) -> bool:
     with sqlite3.connect(DB_FILE) as conn:
         row = conn.execute(
-            "SELECT price_cents FROM deals WHERE asin = ?", (asin,)
+            "SELECT price FROM deals WHERE deal_id = ?", (deal_id,)
         ).fetchone()
     if row is None:
         return False
-    prev_price = row[0]
-    # Re-alert only if new price is >5% cheaper than the last alert
-    return price_cents >= prev_price * 0.95
+    return price >= row[0] * 0.95  # re-alert if drops 5%+ further
 
-
-def record_deal(asin, title, price_cents, discount):
+def record_deal(deal_id, title, price, discount):
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO deals VALUES (?,?,?,?,?)",
-            (asin, title, price_cents, discount, datetime.utcnow().isoformat()),
+            (deal_id, title, price, discount, datetime.utcnow().isoformat()),
         )
 
-
-# ── Keepa deal fetcher ────────────────────────────────────────────────────────
-def is_gaming_brand(title: str) -> bool:
-    t = title.lower()
-    return any(brand in t for brand in GAMING_BRANDS)
-
-
-def fetch_keepa_deals() -> list[dict]:
+# ── Amazon scraper ─────────────────────────────────────────────────────────────
+async def scrape_amazon_deals() -> list[dict]:
     """
-    Calls Keepa's Deal Finder for each gaming category.
-    Returns a deduplicated list of qualifying deal dicts.
+    Uses Playwright to load Amazon's deals pages and extract deal cards.
+    Returns qualifying deals as a list of dicts.
     """
-    found: dict[str, dict] = {}
+    found = {}
 
-    for cat_name, cat_id in CATEGORIES.items():
-        try:
-            resp = requests.get(
-                "https://api.keepa.com/deal",
-                params={
-                    "key":          KEEPA_API_KEY,
-                    "domainId":     1,           # 1 = amazon.com
-                    "deltaPercent": MIN_DISCOUNT_PCT,
-                    "categories":   cat_id,
-                    "page":         0,
-                    "priceTypes":   0,           # 0 = Amazon price
-                },
-                timeout=20,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            log.warning(f"Keepa request failed ({cat_name}): {exc}")
-            continue
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 900},
+            locale="en-US",
+        )
+        page = await context.new_page()
 
-        for item in data.get("deals", {}).get("items", []):
-            asin  = item.get("asin")
-            title = item.get("title", "")
+        # Block images/fonts to load faster
+        await page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
 
-            if not asin or asin in found:
-                continue
-            if not is_gaming_brand(title):
-                continue
+        for url in DEAL_URLS:
+            try:
+                log.info(f"Scraping: {url[:60]}...")
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(3000)  # let JS render deals
 
-            # Keepa stores prices as integer cents; -1 = unavailable
-            current_list = item.get("current", [])
-            avg90_list   = item.get("avg90",   [])
-            if not current_list or current_list[0] < 0:
-                continue
+                # Scroll to load more deals
+                for _ in range(3):
+                    await page.evaluate("window.scrollBy(0, 1500)")
+                    await page.wait_for_timeout(1000)
 
-            current_cents = current_list[0]
-            orig_cents    = avg90_list[0] if avg90_list and avg90_list[0] > 0 else None
+                # Extract deal cards — Amazon uses various selectors, try multiple
+                deals_data = await page.evaluate("""
+                    () => {
+                        const results = [];
 
-            # Fall back to the "was" price field if no 90-day avg
-            if orig_cents is None:
-                was_list = item.get("was", [])
-                if was_list and was_list[0] > 0:
-                    orig_cents = was_list[0]
+                        // Selector patterns Amazon uses for deal cards
+                        const cards = document.querySelectorAll(
+                            '[data-testid="deal-card"], .DealCard, [class*="DealCard"], .octopus-dlp-item-section'
+                        );
 
-            if orig_cents is None or orig_cents <= current_cents:
-                continue
+                        cards.forEach(card => {
+                            try {
+                                // Title
+                                const titleEl = card.querySelector(
+                                    '[data-testid="deal-card-title"], .a-truncate-cut, [class*="title"], h2, .a-size-base-plus'
+                                );
+                                const title = titleEl ? titleEl.innerText.trim() : '';
 
-            discount_pct = round((1 - current_cents / orig_cents) * 100)
-            if discount_pct < MIN_DISCOUNT_PCT:
-                continue
+                                // Current price
+                                const priceEl = card.querySelector(
+                                    '.a-price .a-offscreen, [data-testid="deal-price"], .dealPriceBadge, [class*="DealPrice"]'
+                                );
+                                const priceText = priceEl ? priceEl.innerText.trim() : '';
 
-            found[asin] = {
-                "asin":          asin,
-                "title":         title,
-                "current_cents": current_cents,
-                "orig_cents":    orig_cents,
-                "discount_pct":  discount_pct,
-                "category":      cat_name,
-                "url":           f"https://www.amazon.com/dp/{asin}?tag=YOUR_AFFILIATE_TAG",
-                "image_url":     item.get("image"),
-            }
-            log.info(f"  Found deal: {discount_pct}% off — {title[:60]}")
+                                // Discount badge
+                                const discountEl = card.querySelector(
+                                    '[class*="badge"], [class*="discount"], [class*="saving"], .savingsPercentage'
+                                );
+                                const discountText = discountEl ? discountEl.innerText.trim() : '';
 
-    log.info(f"Keepa scan complete. {len(found)} qualifying deal(s) found.")
+                                // Original price
+                                const origEl = card.querySelector(
+                                    '.a-text-strike, [class*="original"], [class*="list-price"]'
+                                );
+                                const origText = origEl ? origEl.innerText.trim() : '';
+
+                                // Product URL
+                                const linkEl = card.querySelector('a[href]');
+                                const link = linkEl ? linkEl.href : '';
+
+                                // Image
+                                const imgEl = card.querySelector('img');
+                                const img = imgEl ? imgEl.src : '';
+
+                                if (title && (priceText || discountText)) {
+                                    results.push({ title, priceText, discountText, origText, link, img });
+                                }
+                            } catch(e) {}
+                        });
+
+                        return results;
+                    }
+                """)
+
+                log.info(f"  Found {len(deals_data)} raw cards on page")
+
+                for item in deals_data:
+                    title = item.get("title", "")
+                    if not title or not is_gaming_brand(title):
+                        continue
+
+                    # Parse discount %
+                    discount_pct = None
+                    discount_text = item.get("discountText", "")
+                    match = re.search(r"(\d+)\s*%", discount_text)
+                    if match:
+                        discount_pct = int(match.group(1))
+
+                    # If no badge, try calculating from prices
+                    if discount_pct is None:
+                        price_str = re.sub(r"[^\d.]", "", item.get("priceText", ""))
+                        orig_str  = re.sub(r"[^\d.]", "", item.get("origText",  ""))
+                        if price_str and orig_str:
+                            try:
+                                price = float(price_str)
+                                orig  = float(orig_str)
+                                if orig > price > 0:
+                                    discount_pct = round((1 - price / orig) * 100)
+                            except ValueError:
+                                pass
+
+                    if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
+                        continue
+
+                    # Parse current price
+                    price_str = re.sub(r"[^\d.]", "", item.get("priceText", "0"))
+                    try:
+                        price = float(price_str)
+                    except ValueError:
+                        price = 0.0
+
+                    orig_str = re.sub(r"[^\d.]", "", item.get("origText", "0"))
+                    try:
+                        orig = float(orig_str)
+                    except ValueError:
+                        orig = 0.0
+
+                    link = item.get("link", "")
+                    # Extract ASIN from link as deal ID
+                    asin_match = re.search(r"/dp/([A-Z0-9]{10})", link)
+                    deal_id = asin_match.group(1) if asin_match else re.sub(r"\W", "", title[:30])
+
+                    if deal_id in found:
+                        continue
+
+                    found[deal_id] = {
+                        "deal_id":      deal_id,
+                        "title":        title,
+                        "price":        price,
+                        "orig":         orig,
+                        "discount_pct": discount_pct,
+                        "url":          link or f"https://www.amazon.com/dp/{deal_id}",
+                        "image_url":    item.get("img", ""),
+                    }
+                    log.info(f"  ✓ {discount_pct}% off — {title[:55]}")
+
+            except Exception as exc:
+                log.warning(f"Error scraping {url[:50]}: {exc}")
+
+        await browser.close()
+
+    log.info(f"Scrape complete. {len(found)} qualifying deal(s).")
     return list(found.values())
 
 
 # ── Discord embed builder ─────────────────────────────────────────────────────
-DISCOUNT_COLORS = {
-    40: discord.Color.from_rgb(255, 165, 0),   # orange  40-49%
-    50: discord.Color.from_rgb(255, 80,  0),   # deep orange 50-59%
-    60: discord.Color.from_rgb(220, 20,  20),  # red     60-69%
-    70: discord.Color.red(),                   # bright red 70%+
-}
-
-
 def deal_color(pct: int) -> discord.Color:
-    for threshold in sorted(DISCOUNT_COLORS.keys(), reverse=True):
-        if pct >= threshold:
-            return DISCOUNT_COLORS[threshold]
-    return discord.Color.orange()
-
+    if pct >= 70: return discord.Color.red()
+    if pct >= 60: return discord.Color.from_rgb(220, 20, 20)
+    if pct >= 50: return discord.Color.from_rgb(255, 80, 0)
+    return discord.Color.from_rgb(255, 165, 0)
 
 def build_embed(deal: dict) -> discord.Embed:
-    current = deal["current_cents"] / 100
-    orig    = deal["orig_cents"]    / 100
-    savings = orig - current
-    pct     = deal["discount_pct"]
-
-    # Fire emoji tier based on discount size
-    fire = "🔥" if pct < 50 else ("🔥🔥" if pct < 60 else "🔥🔥🔥")
+    price = deal["price"]
+    orig  = deal["orig"]
+    pct   = deal["discount_pct"]
+    fire  = "🔥" if pct < 50 else ("🔥🔥" if pct < 60 else "🔥🔥🔥")
 
     embed = discord.Embed(
         title     = f"{fire} {pct}% OFF — {deal['title'][:180]}",
@@ -231,20 +277,21 @@ def build_embed(deal: dict) -> discord.Embed:
         color     = deal_color(pct),
         timestamp = datetime.utcnow(),
     )
-    embed.add_field(name="💰 Sale Price",    value=f"**${current:.2f}**",      inline=True)
-    embed.add_field(name="📦 Was (90d avg)", value=f"~~${orig:.2f}~~",         inline=True)
-    embed.add_field(name="💸 You Save",      value=f"**${savings:.2f}**",      inline=True)
-    embed.add_field(name="📂 Category",      value=deal["category"],            inline=True)
-    embed.add_field(
-        name="📈 Price History",
-        value=f"[CamelCamelCamel](https://camelcamelcamel.com/product/{deal['asin']})",
-        inline=True,
-    )
-    embed.add_field(
-        name="🛒 Buy Now",
-        value=f"[Amazon Link]({deal['url']})",
-        inline=True,
-    )
+
+    if price > 0:
+        embed.add_field(name="💰 Sale Price",    value=f"**${price:.2f}**",     inline=True)
+    if orig > 0:
+        embed.add_field(name="📦 Was",           value=f"~~${orig:.2f}~~",      inline=True)
+    if price > 0 and orig > 0:
+        embed.add_field(name="💸 You Save",      value=f"**${orig-price:.2f}**", inline=True)
+
+    if deal.get("deal_id") and len(deal["deal_id"]) == 10:
+        embed.add_field(
+            name="📈 Price History",
+            value=f"[CamelCamelCamel](https://camelcamelcamel.com/product/{deal['deal_id']})",
+            inline=True,
+        )
+    embed.add_field(name="🛒 Buy Now", value=f"[View on Amazon]({deal['url']})", inline=True)
 
     if deal.get("image_url"):
         embed.set_thumbnail(url=deal["image_url"])
@@ -257,93 +304,71 @@ def build_embed(deal: dict) -> discord.Embed:
 intents = discord.Intents.default()
 bot     = commands.Bot(command_prefix="!", intents=intents)
 
-
 @tasks.loop(hours=CHECK_HOURS)
 async def deal_loop():
     log.info("Starting deal scan...")
     channel = bot.get_channel(CHANNEL_ID)
     if channel is None:
-        log.error(f"Channel {CHANNEL_ID} not found — check config.json")
+        log.error(f"Channel {CHANNEL_ID} not found")
         return
 
-    loop   = asyncio.get_event_loop()
-    deals  = await loop.run_in_executor(None, fetch_keepa_deals)
+    deals  = await scrape_amazon_deals()
     posted = 0
 
     for deal in sorted(deals, key=lambda d: d["discount_pct"], reverse=True):
-        if already_alerted(deal["asin"], deal["current_cents"]):
+        if already_alerted(deal["deal_id"], deal["price"]):
             continue
         await channel.send(embed=build_embed(deal))
-        record_deal(deal["asin"], deal["title"], deal["current_cents"], deal["discount_pct"])
+        record_deal(deal["deal_id"], deal["title"], deal["price"], deal["discount_pct"])
         posted += 1
-        await asyncio.sleep(1.5)   # avoid rate-limiting Discord
+        await asyncio.sleep(1.5)
 
-    if posted == 0:
-        log.info("No new deals to post.")
-    else:
-        log.info(f"Posted {posted} new deal(s).")
-
+    log.info(f"Done — posted {posted} new deal(s).")
 
 @deal_loop.before_loop
 async def before_loop():
     await bot.wait_until_ready()
 
-
-# ── Bot commands ──────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     db_init()
     deal_loop.start()
-    log.info(f"Logged in as {bot.user}  |  Monitoring {len(CATEGORIES)} categories  |  Min {MIN_DISCOUNT_PCT}% off")
+    log.info(f"Logged in as {bot.user}  |  Min {MIN_DISCOUNT_PCT}% off  |  Every {CHECK_HOURS}h")
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         await channel.send(
             f"🤖 **Amazon Gaming Deal Monitor online!**\n"
-            f"Scanning {len(CATEGORIES)} categories every **{CHECK_HOURS}h** "
-            f"for name-brand items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
-            f"Use `!check` to force a scan now or `!stats` to see tracked deals."
+            f"Scanning Amazon deals every **{CHECK_HOURS}h** for name-brand items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
+            f"Use `!check` to scan now, `!stats` to see tracked deals."
         )
-
 
 @bot.command(name="check")
 @commands.has_permissions(manage_messages=True)
 async def cmd_check(ctx):
-    """Force an immediate deal scan (requires Manage Messages permission)."""
     await ctx.send("🔍 Running manual deal scan...")
     await deal_loop()
 
-
 @bot.command(name="stats")
 async def cmd_stats(ctx):
-    """Show deal tracking statistics."""
     with sqlite3.connect(DB_FILE) as conn:
-        total = conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0]
+        total  = conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0]
         recent = conn.execute(
             "SELECT title, discount, alerted_at FROM deals ORDER BY alerted_at DESC LIMIT 5"
         ).fetchall()
-
     embed = discord.Embed(title="📊 Deal Monitor Stats", color=discord.Color.blurple())
     embed.add_field(name="Total Deals Tracked", value=str(total), inline=False)
     if recent:
-        lines = "\n".join(
-            f"• **{r[1]}%** off — {r[0][:55]}…  `{r[2][:10]}`"
-            for r in recent
-        )
-        embed.add_field(name="5 Most Recent Alerts", value=lines, inline=False)
-    embed.set_footer(text=f"Checking every {CHECK_HOURS}h  •  Min {MIN_DISCOUNT_PCT}% off")
+        lines = "\n".join(f"• **{r[1]}%** off — {r[0][:55]}…" for r in recent)
+        embed.add_field(name="5 Most Recent", value=lines, inline=False)
     await ctx.send(embed=embed)
-
 
 @bot.command(name="dealhelp")
 async def cmd_help(ctx):
-    """Show available commands."""
     embed = discord.Embed(title="🎮 Gaming Deal Bot Commands", color=discord.Color.green())
     embed.add_field(name="!check",    value="Force a deal scan right now *(mod only)*", inline=False)
     embed.add_field(name="!stats",    value="Show total deals tracked + recent alerts",  inline=False)
     embed.add_field(name="!dealhelp", value="Show this help message",                    inline=False)
     await ctx.send(embed=embed)
 
-
-# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
