@@ -1,138 +1,105 @@
 # 🎮 Amazon Gaming Deal Monitor — Discord Bot
 
-Monitors Amazon for **name-brand gaming components** (GPUs, monitors, keyboards, mice,
-headsets, RAM, SSDs, cases, CPUs, etc.) and posts a Discord embed whenever one drops
-**40% or more** off its 90-day average price.
+Monitors Amazon for **name-brand gaming components** and posts a Discord embed whenever one drops **40% or more** off its listed price. No API key or paid subscription required — fully free to run.
 
 ---
 
 ## How it works
 
 ```
-Every N hours:
-  Keepa Deal API  ──►  filter by gaming brand  ──►  filter by discount %
+Every 2 hours:
+  Playwright (headless Chrome)  ──►  scrapes Amazon deals pages
         │
-        └──► new deal found  ──►  Discord embed  ──►  SQLite (prevent duplicates)
+        └──► filter by gaming brand  ──►  filter by discount %
+                    │
+                    └──► new deal found  ──►  Discord embed  ──►  SQLite (prevent duplicates)
 ```
 
-- **Keepa API** provides reliable Amazon price data without scraping
-- **14 categories** are scanned: GPUs, monitors, peripherals, storage, RAM, cases, etc.
+- **Playwright** scrapes Amazon's Today's Deals pages using a headless Chromium browser
 - **50+ brand keywords** ensure only name-brand items get posted
-- **SQLite** tracks every alert so you never see the same deal twice (unless price drops further)
+- **SQLite** tracks every alert so you never see the same deal twice (unless the price drops 5%+ further)
+- **Multiple channels** supported — post to as many servers as you want
+
+---
+
+## Brands monitored
+
+| Category | Brands |
+|---|---|
+| Peripherals | Logitech, Razer, Corsair, SteelSeries, HyperX, Roccat, Glorious, Ducky, Keychron, Elgato, Astro, Sennheiser |
+| GPUs | EVGA, Zotac, Sapphire, XFX, PowerColor, MSI, Gigabyte, ASUS ROG/TUF/Dual/Prime, RTX, GTX, RX 6/7, GeForce, Radeon |
+| Monitors | LG Ultragear, BenQ, AOC, ViewSonic, Alienware, Samsung Odyssey, Acer Predator, Acer Nitro, HP Omen |
+| Storage | WD Black, Seagate, Crucial, Kingston, Samsung 970/980/990 |
+| Memory | G.Skill, Corsair Vengeance, Kingston Fury |
+| Cases & Cooling | NZXT, Cooler Master, Thermaltake, be quiet!, Fractal Design, Lian Li, Phanteks, Deepcool |
+| CPUs | AMD Ryzen, Intel Core, ASRock |
+| Headsets | SteelSeries Arctis, Razer BlackShark, Corsair Virtuoso, HyperX Cloud, Logitech G Pro |
 
 ---
 
 ## Setup
 
-### Step 1 — Get a Keepa API Key
-
-1. Go to **https://keepa.com/** and create a free account
-2. Go to **https://keepa.com/#!api** and subscribe to a plan
-   - **Free tier**: 100 tokens/day — enough to test but limited (each category scan uses ~10 tokens)
-   - **Personal plan (~$19/mo)**: 2,000 tokens/day — runs comfortably with 2h checks
-3. Copy your API key
-
-### Step 2 — Create a Discord Bot
+### Step 1 — Create a Discord Bot
 
 1. Go to **https://discord.com/developers/applications** → **New Application**
-2. Go to **Bot** tab → **Add Bot** → copy the **Token**
+2. Go to **Bot** tab → copy the **Token**
 3. Under **Privileged Gateway Intents**, enable **Message Content Intent**
 4. Go to **OAuth2 → URL Generator**:
-   - Scopes: `bot`
-   - Bot Permissions: `Send Messages`, `Embed Links`, `Read Message History`, `Manage Messages`
-5. Copy the generated URL → open it → add bot to your server
+   - Scopes: ✅ `bot` and ✅ `applications.commands`
+   - Bot Permissions: ✅ `Send Messages`, `Embed Links`, `Read Message History`
+5. Copy the generated URL → open it → add the bot to your server
 
-### Step 3 — Get Your Channel ID
+### Step 2 — Get Your Channel ID(s)
 
 1. In Discord: Settings → Advanced → Enable **Developer Mode**
-2. Right-click the channel you want deals posted in → **Copy ID**
+2. Right-click the channel you want deals posted in → **Copy Channel ID**
+3. Repeat for any additional channels you want
 
-### Step 4 — Configure
+### Step 3 — Deploy to Railway
 
-Edit `config.json`:
+1. Push this repo to a private GitHub repo
+2. Go to **https://railway.app** → **New Project** → **Deploy from GitHub repo**
+3. Select your repo → **Deploy Now**
+4. Go to **Variables** tab and add:
 
-```json
-{
-  "discord_token":        "MTIz...",
-  "channel_id":           "123456789012345678",
-  "keepa_api_key":        "abcdefghijklmnop",
-  "min_discount_percent": 40,
-  "check_interval_hours": 2
-}
-```
+| Variable | Value |
+|---|---|
+| `DISCORD_TOKEN` | Your Discord bot token |
+| `CHANNEL_ID` | One channel ID, or multiple separated by commas: `123,456,789` |
+| `MIN_DISCOUNT_PERCENT` | Minimum discount to alert on (default: `40`) |
+| `CHECK_INTERVAL_HOURS` | How often to scan in hours (default: `2`) |
 
-| Setting                  | Description                                          |
-|--------------------------|------------------------------------------------------|
-| `discord_token`          | Your Discord bot token                               |
-| `channel_id`             | Channel where deals get posted                       |
-| `keepa_api_key`          | Your Keepa API key                                   |
-| `min_discount_percent`   | Minimum discount to alert (default: 40)              |
-| `check_interval_hours`   | How often to scan (default: 2, minimum recommended: 1) |
+Railway will auto-redeploy whenever you change a variable or push new code.
 
-### Step 5 — Install & Run
+### Step 4 — Add to more servers
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the bot
-python bot.py
-```
+Just invite the bot to another server using the OAuth2 URL from Step 1, then add the new channel ID to `CHANNEL_ID` in Railway, separated by a comma.
 
 ---
 
-## Discord Commands
+## Slash Commands
 
-| Command      | Description                               | Who can use     |
-|--------------|-------------------------------------------|-----------------|
-| `!check`     | Force an immediate deal scan              | Manage Messages |
-| `!stats`     | Show total deals tracked + recent alerts  | Everyone        |
-| `!dealhelp`  | Show available commands                   | Everyone        |
-
----
-
-## Customization
-
-### Add/remove brands
-
-In `bot.py`, edit the `GAMING_BRANDS` list. Brands are matched as substrings (case-insensitive),
-so `"samsung"` matches "Samsung 990 Pro SSD" and "Samsung Odyssey Monitor".
-
-### Add/remove categories
-
-In `bot.py`, edit the `CATEGORIES` dict. To find Keepa category IDs:
-- Visit https://keepa.com/#!categorytree
-- Navigate to the category and copy the ID from the URL
-
-### Change minimum discount
-
-In `config.json`, set `"min_discount_percent"` to any value (e.g. 50 for stricter filtering).
+| Command | Description |
+|---|---|
+| `/check` | Force an immediate deal scan |
+| `/stats` | Show total deals tracked + 5 most recent |
+| `/help` | Show available commands |
 
 ---
 
-## Running 24/7
+## Adjusting settings
 
-### On Windows (Task Scheduler)
+All settings are controlled via Railway environment variables — no code changes needed:
 
-1. Create a `.bat` file:
-   ```bat
-   @echo off
-   cd C:\path\to\amazon-deal-bot
-   python bot.py
-   ```
-2. Open Task Scheduler → Create Basic Task → set trigger to "At startup"
+- **Raise/lower the discount threshold** → change `MIN_DISCOUNT_PERCENT` (e.g. `30` for more deals, `50` for fewer)
+- **Scan more/less often** → change `CHECK_INTERVAL_HOURS`
+- **Add a new channel** → append its ID to `CHANNEL_ID` with a comma
 
-### On Linux/Mac (systemd or screen)
+---
 
-```bash
-# Using screen (simplest)
-screen -S deal-bot
-python bot.py
-# Ctrl+A, D to detach
+## Adding/removing brands
 
-# Using systemd (production)
-# Create /etc/systemd/system/deal-bot.service
-```
+Edit the `GAMING_BRANDS` list in `bot.py`. Brands are matched as substrings (case-insensitive), so `"samsung"` matches anything with Samsung in the title. After editing, push to GitHub and Railway will auto-redeploy.
 
 ---
 
@@ -140,22 +107,37 @@ python bot.py
 
 ```
 🔥🔥 55% OFF — Razer DeathAdder V3 HyperSpeed Wireless Gaming Mouse
-💰 Sale Price    📦 Was (90d avg)   💸 You Save
-  $27.49           ~~$59.99~~         $32.50
+💰 Sale Price    📦 Was         💸 You Save
+  $27.49           ~~$59.99~~     $32.50
 
-📂 Category              📈 Price History         🛒 Buy Now
-  Gaming Keyboards       CamelCamelCamel          Amazon Link
-  & Mice
+📈 Price History          🛒 Buy Now
+  CamelCamelCamel          View on Amazon
 
 Amazon Gaming Deals  •  Updates every 2h  •  Min 40% off
 ```
 
 ---
 
-## Token usage (Keepa)
+## File structure
 
-Each API call to the deal endpoint uses approximately **10 tokens per category**.
-With 14 categories and checks every 2 hours → ~14 × 12 = **168 tokens/day**.
-This requires at least the entry-level paid plan ($19/mo for 2,000 tokens/day).
+```
+amazon-deal-bot/
+  bot.py              — Main bot (scraper, Discord embeds, slash commands)
+  requirements.txt    — Python dependencies
+  Procfile            — Railway startup command
+  nixpacks.toml       — Railway build config (installs Chromium)
+  config.example.json — Local config template (copy to config.json for local use)
+  .gitignore          — Keeps config.json and deals_seen.db out of git
+```
 
-For the free tier (100/day), set `check_interval_hours` to 12 and reduce categories.
+---
+
+## Running locally
+
+```bash
+cp config.example.json config.json
+# Edit config.json with your real tokens
+pip install -r requirements.txt
+playwright install chromium
+python bot.py
+```
