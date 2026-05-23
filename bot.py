@@ -274,14 +274,14 @@ class DealBot(discord.Client):
 
 bot = DealBot()
 
-# ── Background scan loop ──────────────────────────────────────────────────────
-@tasks.loop(hours=CHECK_HOURS)
-async def deal_loop():
+# ── Core scan function (used by both the loop and /check) ─────────────────────
+async def run_scan() -> int:
+    """Scrapes Amazon, posts new deals to the channel. Returns count of new deals posted."""
     log.info("Starting deal scan...")
     channel = bot.get_channel(CHANNEL_ID)
     if channel is None:
         log.error(f"Channel {CHANNEL_ID} not found")
-        return
+        return 0
 
     deals  = await scrape_amazon_deals()
     posted = 0
@@ -295,6 +295,12 @@ async def deal_loop():
         await asyncio.sleep(1.5)
 
     log.info(f"Done — posted {posted} new deal(s).")
+    return posted
+
+# ── Background scan loop ──────────────────────────────────────────────────────
+@tasks.loop(hours=CHECK_HOURS)
+async def deal_loop():
+    await run_scan()
 
 @deal_loop.before_loop
 async def before_loop():
@@ -304,8 +310,12 @@ async def before_loop():
 @bot.tree.command(name="check", description="Force an immediate Amazon deal scan")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def slash_check(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 Running deal scan now...")
-    await deal_loop()
+    await interaction.response.send_message("🔍 Scanning Amazon for deals, this may take a minute...")
+    posted = await run_scan()
+    if posted == 0:
+        await interaction.followup.send("😴 No new deals found right now that are ≥ **40% off** from a name brand. Try again later!")
+    else:
+        await interaction.followup.send(f"✅ Done! Found and posted **{posted}** new deal(s) above.")
 
 @bot.tree.command(name="stats", description="Show how many deals have been tracked")
 async def slash_stats(interaction: discord.Interaction):
