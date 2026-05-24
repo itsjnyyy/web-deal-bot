@@ -231,80 +231,51 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            // Find all elements with a price — these are product cards
-                    const priceEls = [...document.querySelectorAll('.a-price')];
-                    // Walk up to find the card container for each price
-                    const cardSet = new Set();
-                    priceEls.forEach(el => {
-                        let node = el;
-                        for (let i = 0; i < 6; i++) {
-                            node = node.parentElement;
-                            if (!node) break;
-                            const cls = node.className || '';
-                            const tag = node.tagName || '';
-                            if (cls.includes('Card') || cls.includes('card') ||
-                                cls.includes('Item') || cls.includes('item') ||
-                                cls.includes('Product') || cls.includes('product') ||
-                                cls.includes('Deal') || cls.includes('deal') ||
-                                tag === 'LI' || tag === 'ARTICLE') {
-                                cardSet.add(node);
-                                break;
-                            }
-                        }
-                    });
-                    const cards = [...cardSet];
-                    console.log('PRICE_BASED_CARDS: ' + cards.length);
+                            // dcl-product-detail is Amazon's deal card class (confirmed from logs)
+                    const cards = [...document.querySelectorAll('.dcl-product-detail')];
+                    console.log('DEAL_CARDS_FOUND: ' + cards.length);
                     if (cards.length > 0) {
-                        console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1000));
-                        console.log('CARD_CLASSES:', cards[0].className);
+                        console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1200));
                     }
                             cards.forEach(card => {
                                 try {
-                                    // Try many possible title selectors
+                                    // Title — dcl uses a-truncate or heading spans
                                     const titleEl = card.querySelector(
-                                        '[data-testid="deal-card-title"], ' +
-                                        '[class*="truncatedTitle"], ' +
-                                        '[class*="DealContent"] span, ' +
-                                        '.a-truncate-cut, ' +
-                                        '[class*="title"] span, ' +
-                                        'h2 span, ' +
-                                        '.a-size-base-plus, ' +
-                                        '.a-size-medium'
+                                        '.a-truncate-cut, .a-truncate, ' +
+                                        '[class*="title"], h2, h3, ' +
+                                        '.a-size-base-plus, .a-size-medium, .a-size-small'
                                     );
                                     const title = titleEl ? titleEl.innerText.trim() : '';
+
+                                    // Sale price
                                     const priceEl = card.querySelector(
-                                        '.a-price .a-offscreen, ' +
-                                        '[data-testid="deal-price"], ' +
-                                        '[class*="DealPrice"], ' +
-                                        '[class*="dealPrice"], ' +
-                                        '.a-price-whole'
+                                        '.a-price .a-offscreen, .a-price-whole, ' +
+                                        '[class*="price"] .a-offscreen'
                                     );
                                     const priceText = priceEl ? priceEl.innerText.trim() : '';
+
+                                    // Discount badge — dcl uses savingsPercentage or % text
                                     const discountEl = card.querySelector(
-                                        '[class*="badgeLabel"], ' +
-                                        '[class*="BadgeLabel"], ' +
-                                        '[class*="discount"], ' +
-                                        '[class*="Discount"], ' +
-                                        '[class*="saving"], ' +
-                                        '[class*="Saving"], ' +
-                                        '.savingsPercentage, ' +
-                                        '[class*="percentage"], ' +
-                                        '[class*="badge"]'
+                                        '.savingsPercentage, [id*="savingsPercentage"], ' +
+                                        '[class*="badge"], [class*="saving"], [class*="discount"], ' +
+                                        '[class*="percent"]'
                                     );
                                     const discountText = discountEl ? discountEl.innerText.trim() : '';
+
+                                    // Original/list price
                                     const origEl = card.querySelector(
-                                        '.a-text-strike, ' +
-                                        '[class*="originalPrice"], ' +
-                                        '[class*="listPrice"], ' +
-                                        '[class*="list-price"], ' +
-                                        '.a-price.a-text-price span'
+                                        '.a-text-strike, .a-price.a-text-price .a-offscreen, ' +
+                                        '[class*="listPrice"], [data-a-strike="true"]'
                                     );
                                     const origText = origEl ? origEl.innerText.trim() : '';
-                                    const linkEl = card.querySelector('a[href]');
+
+                                    // Link and image
+                                    const linkEl = card.querySelector('a[href*="/dp/"], a[href*="amazon.com"]');
                                     const link = linkEl ? linkEl.href : '';
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
-                                    if (title && (priceText || discountText)) {
+
+                                    if (title && link) {
                                         results.push({title, priceText, discountText, origText, link, img});
                                     }
                                 } catch(e) {}
