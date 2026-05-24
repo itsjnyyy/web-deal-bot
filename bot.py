@@ -51,14 +51,32 @@ CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
 # ── Slickdeals search terms ───────────────────────────────────────────────────
 SLICKDEALS_SEARCHES = [
+    # PC components & peripherals
     "gaming monitor", "gaming keyboard", "gaming mouse", "gaming headset",
     "graphics card", "GPU", "gaming laptop", "SSD", "RAM DDR",
-    "gaming chair", "gaming controller", "CPU processor", "PC case",
+    "gaming chair", "CPU processor", "PC case",
     "mechanical keyboard", "wireless mouse", "gaming microphone",
+    # Console controllers
+    "PS5 controller", "PlayStation controller", "DualSense",
+    "Xbox controller", "Xbox Series controller",
+    "Nintendo Switch controller", "Switch Pro controller",
+    "gaming controller wireless",
+    # Steering wheels & sim racing
+    "racing wheel", "steering wheel PC", "Logitech G wheel",
+    "Thrustmaster wheel", "Fanatec wheel", "sim racing pedals",
+    "racing simulator", "force feedback wheel",
+    # Console headsets
+    "PS5 headset", "PlayStation headset", "Xbox headset",
+    "Nintendo Switch headset", "console gaming headset",
+    "wireless gaming headset",
+    # Console accessories
+    "PS5 accessories", "Xbox accessories", "Nintendo Switch accessories",
+    "capture card", "gaming webcam",
 ]
 
 # ── Gaming brand filter ───────────────────────────────────────────────────────
 GAMING_BRANDS = [
+    # PC peripherals
     "logitech", "razer", "corsair", "steelseries", "hyperx", "roccat",
     "glorious", "ducky", "keychron", "elgato", "astro", "sennheiser",
     "evga", "zotac", "sapphire", "xfx", "powercolor", "msi", "gigabyte",
@@ -73,6 +91,22 @@ GAMING_BRANDS = [
     "rtx", "gtx", "rx 6", "rx 7", "geforce", "radeon",
     "steelseries arctis", "razer blackshark", "corsair virtuoso",
     "hyperx cloud", "logitech g pro",
+    # Console controllers
+    "dualsense", "dualshock", "playstation controller",
+    "xbox controller", "xbox elite", "xbox series",
+    "nintendo switch pro", "switch pro controller", "joycon", "joy-con",
+    "8bitdo", "powera", "nacon", "scuf", "victrix", "backbone",
+    # Steering wheels & sim racing
+    "logitech g29", "logitech g920", "logitech g923",
+    "thrustmaster", "fanatec", "moza racing", "simagic",
+    "hori racing", "pxn wheel",
+    # Console headsets
+    "sony pulse", "pulse 3d", "pulse explore",
+    "xbox wireless headset", "astro a50", "astro a40", "astro a30",
+    "steelseries arctis nova", "razer kaira", "corsair hs",
+    "turtle beach", "plantronics", "jabra",
+    # Capture & streaming
+    "elgato capture", "avermedia", "razer ripsaw",
 ]
 
 def is_gaming_brand(title: str) -> bool:
