@@ -231,50 +231,36 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            // dcl-product-detail is Amazon's deal card class (confirmed from logs)
-                    const cards = [...document.querySelectorAll('.dcl-product-detail')];
-                    console.log('DEAL_CARDS_FOUND: ' + cards.length);
-                    if (cards.length > 0) {
-                        console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1200));
-                    }
+                            const cards = [...document.querySelectorAll('.dcl-product-detail')];
+                            console.log('DEAL_CARDS_FOUND: ' + cards.length);
+                            if (cards.length > 0) {
+                                console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1200));
+                            }
                             cards.forEach(card => {
                                 try {
-                                    // Title — dcl uses a-truncate or heading spans
                                     const titleEl = card.querySelector(
-                                        '.a-truncate-cut, .a-truncate, ' +
-                                        '[class*="title"], h2, h3, ' +
+                                        '.a-truncate-cut, .a-truncate, [class*="title"], h2, h3, ' +
                                         '.a-size-base-plus, .a-size-medium, .a-size-small'
                                     );
                                     const title = titleEl ? titleEl.innerText.trim() : '';
-
-                                    // Sale price
                                     const priceEl = card.querySelector(
-                                        '.a-price .a-offscreen, .a-price-whole, ' +
-                                        '[class*="price"] .a-offscreen'
+                                        '.a-price .a-offscreen, .a-price-whole, [class*="price"] .a-offscreen'
                                     );
                                     const priceText = priceEl ? priceEl.innerText.trim() : '';
-
-                                    // Discount badge — dcl uses savingsPercentage or % text
                                     const discountEl = card.querySelector(
                                         '.savingsPercentage, [id*="savingsPercentage"], ' +
-                                        '[class*="badge"], [class*="saving"], [class*="discount"], ' +
-                                        '[class*="percent"]'
+                                        '[class*="badge"], [class*="saving"], [class*="discount"], [class*="percent"]'
                                     );
                                     const discountText = discountEl ? discountEl.innerText.trim() : '';
-
-                                    // Original/list price
                                     const origEl = card.querySelector(
                                         '.a-text-strike, .a-price.a-text-price .a-offscreen, ' +
                                         '[class*="listPrice"], [data-a-strike="true"]'
                                     );
                                     const origText = origEl ? origEl.innerText.trim() : '';
-
-                                    // Link and image
                                     const linkEl = card.querySelector('a[href*="/dp/"], a[href*="amazon.com"]');
                                     const link = linkEl ? linkEl.href : '';
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
-
                                     if (title && link) {
                                         results.push({title, priceText, discountText, origText, link, img});
                                     }
