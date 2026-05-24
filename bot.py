@@ -276,16 +276,12 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            // Handle both deals pages (dcl-product-detail) and search results (s-result-item)
-                    const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
-                    const searchCards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
-                    const cards = dealCards.length > 0 ? dealCards : searchCards;
-                            console.log('DEAL_CARDS_FOUND: ' + cards.length);
-                            if (cards.length > 0) {
-                            }
-                            cards.forEach((card, idx) => {
+                            const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
+                            const searchCards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
+                            const cards = dealCards.length > 0 ? dealCards : searchCards;
+                            cards.forEach((card) => {
                                 try {
-                                    // Get link — check data-asin first (search results), then walk parents
+                                    // Search result cards have data-asin directly
                                     let link = '';
                                     const asinAttr = card.getAttribute('data-asin');
                                     if (asinAttr) {
@@ -295,42 +291,16 @@ async def scrape_amazon_deals() -> list[dict]:
                                         for (let i = 0; i < 5; i++) {
                                             if (!node) break;
                                             if (node.tagName === 'A' && node.href) { link = node.href; break; }
-                                            const a = node.querySelector('a[href*="/dp/"]') ||
-                                                      node.querySelector('a[href*="amazon.com"]') ||
-                                                      node.querySelector('a[href]');
+                                            const a = node.querySelector('a[href*="/dp/"]') || node.querySelector('a[href]');
                                             if (a) { link = a.href; break; }
                                             node = node.parentElement;
                                         }
                                     }
-
-                                    // Get image + alt text (often contains product title)
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
-                                    const imgAlt = imgEl ? (imgEl.alt || imgEl.getAttribute('aria-label') || '') : '';
-
-                                    // Get aria-label from card or parent (sometimes has full title)
-                                    let ariaLabel = card.getAttribute('aria-label') || '';
-                                    if (!ariaLabel) {
-                                        node = card.parentElement;
-                                        for (let i = 0; i < 4; i++) {
-                                            if (!node) break;
-                                            ariaLabel = node.getAttribute('aria-label') || '';
-                                            if (ariaLabel) break;
-                                            node = node.parentElement;
-                                        }
-                                    }
-
-                                    // Get all text including hidden spans
                                     const allText = card.innerText || '';
-
-                                    results.push({
-                                        rawText: allText,
-                                        imgAlt: imgAlt,
-                                        ariaLabel: ariaLabel,
-                                        link: link,
-                                        img: img,
-                                    });
-                                } catch(e) { console.log('CARD_ERR: ' + e.message); }
+                                    results.push({ rawText: allText, link: link, img: img });
+                                } catch(e) {}
                             });
                             return results;
                         }
