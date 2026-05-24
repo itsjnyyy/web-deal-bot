@@ -61,11 +61,11 @@ CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
 # ── CamelCamelCamel + Slickdeals fallback feeds ───────────────────────────────
 CAMEL_FEEDS = [
-    ("Electronics",    "https://camelcamelcamel.com/top_drops/electronics/xml"),
-    ("Computers",      "https://camelcamelcamel.com/top_drops/computers/xml"),
-    ("Video Games",    "https://camelcamelcamel.com/top_drops/video_games/xml"),
-    ("Camera & Photo", "https://camelcamelcamel.com/top_drops/camera/xml"),
-    ("PC Gaming",      "https://camelcamelcamel.com/top_drops/pc/xml"),
+    ("Electronics",  "https://camelcamelcamel.com/top_drops/amazon/1/xml"),
+    ("Computers",    "https://camelcamelcamel.com/top_drops/amazon/2/xml"),
+    ("Video Games",  "https://camelcamelcamel.com/top_drops/amazon/11/xml"),
+    ("Camera",       "https://camelcamelcamel.com/top_drops/amazon/3/xml"),
+    ("Software",     "https://camelcamelcamel.com/top_drops/amazon/4/xml"),
 ]
 
 SLICKDEALS_SEARCHES = [
@@ -212,27 +212,84 @@ async def scrape_amazon_deals() -> list[dict]:
                         await page.evaluate("window.scrollBy(0, 1500)")
                         await page.wait_for_timeout(800)
 
-                    page_size = len(await page.content())
+                    page_content = await page.content()
+                    page_size = len(page_content)
                     log.info(f"  Page size: {page_size} bytes")
                     if page_size < 50000:
                         log.warning("  Page too small — likely blocked")
                         continue
+                    # Log a snippet of class names to help debug selectors
+                    class_snippet = await page.evaluate("""
+                        () => [...new Set([...document.querySelectorAll('[class]')]
+                            .map(el => [...el.classList]).flat()
+                            .filter(c => /deal|item|grid|card|product/i.test(c))
+                        )].slice(0, 30).join(', ')
+                    """)
+                    log.info(f"  Relevant classes: {class_snippet[:200]}")
 
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            const cards = document.querySelectorAll(
-                                '[data-testid="deal-card"], .DealCard, [class*="DealCard"], .octopus-dlp-item-section'
-                            );
+                            // Dump page structure to help debug
+                    const allClasses = [...new Set([...document.querySelectorAll('[class]')]
+                        .map(el => el.className.split(' ')).flat()
+                        .filter(c => c.toLowerCase().includes('deal') || c.toLowerCase().includes('grid') || c.toLowerCase().includes('item'))
+                    )].slice(0, 20);
+                    console.log('Deal-related classes:', allClasses.join(', '));
+
+                    const cards = document.querySelectorAll(
+                        '[data-testid="deal-card"], ' +
+                        '[data-testid*="deal"], ' +
+                        '.DealCard, ' +
+                        '[class*="DealCard"], ' +
+                        '[class*="dealCard"], ' +
+                        '[class*="GridItem"], ' +
+                        '[class*="dealGridItem"], ' +
+                        '.octopus-dlp-item-section, ' +
+                        '[data-deal-id], ' +
+                        '[data-testid="grid-unit"]'
+                    );
                             cards.forEach(card => {
                                 try {
-                                    const titleEl = card.querySelector('[data-testid="deal-card-title"], .a-truncate-cut, [class*="title"], h2, .a-size-base-plus');
+                                    // Try many possible title selectors
+                                    const titleEl = card.querySelector(
+                                        '[data-testid="deal-card-title"], ' +
+                                        '[class*="truncatedTitle"], ' +
+                                        '[class*="DealContent"] span, ' +
+                                        '.a-truncate-cut, ' +
+                                        '[class*="title"] span, ' +
+                                        'h2 span, ' +
+                                        '.a-size-base-plus, ' +
+                                        '.a-size-medium'
+                                    );
                                     const title = titleEl ? titleEl.innerText.trim() : '';
-                                    const priceEl = card.querySelector('.a-price .a-offscreen, [data-testid="deal-price"], [class*="DealPrice"]');
+                                    const priceEl = card.querySelector(
+                                        '.a-price .a-offscreen, ' +
+                                        '[data-testid="deal-price"], ' +
+                                        '[class*="DealPrice"], ' +
+                                        '[class*="dealPrice"], ' +
+                                        '.a-price-whole'
+                                    );
                                     const priceText = priceEl ? priceEl.innerText.trim() : '';
-                                    const discountEl = card.querySelector('[class*="badge"], [class*="discount"], [class*="saving"], .savingsPercentage');
+                                    const discountEl = card.querySelector(
+                                        '[class*="badgeLabel"], ' +
+                                        '[class*="BadgeLabel"], ' +
+                                        '[class*="discount"], ' +
+                                        '[class*="Discount"], ' +
+                                        '[class*="saving"], ' +
+                                        '[class*="Saving"], ' +
+                                        '.savingsPercentage, ' +
+                                        '[class*="percentage"], ' +
+                                        '[class*="badge"]'
+                                    );
                                     const discountText = discountEl ? discountEl.innerText.trim() : '';
-                                    const origEl = card.querySelector('.a-text-strike, [class*="original"], [class*="list-price"]');
+                                    const origEl = card.querySelector(
+                                        '.a-text-strike, ' +
+                                        '[class*="originalPrice"], ' +
+                                        '[class*="listPrice"], ' +
+                                        '[class*="list-price"], ' +
+                                        '.a-price.a-text-price span'
+                                    );
                                     const origText = origEl ? origEl.innerText.trim() : '';
                                     const linkEl = card.querySelector('a[href]');
                                     const link = linkEl ? linkEl.href : '';
