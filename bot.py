@@ -128,7 +128,31 @@ def db_init():
             )
         """)
 
-def already_alerted(deal_id: str, price: float) -> bool:
+def already_alerted_today(deal_id: str, price: float) -> bool:
+    """
+    Returns True if this deal was already posted today (auto scan).
+    Re-alerts if the price has dropped 5%+ since the last alert.
+    """
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    with sqlite3.connect(DB_FILE) as conn:
+        row = conn.execute(
+            "SELECT price, alerted_at FROM deals WHERE deal_id = ?", (deal_id,)
+        ).fetchone()
+    if row is None:
+        return False
+    prev_price, alerted_at = row
+    alerted_date = alerted_at[:10]  # "YYYY-MM-DD"
+    # Allow re-alert if price dropped 5%+ regardless of date
+    if price < prev_price * 0.95:
+        return False
+    # Block if already alerted today
+    return alerted_date == today
+
+def already_alerted_ever(deal_id: str, price: float) -> bool:
+    """
+    Returns True if this deal was ever posted, unless price dropped 5%+.
+    Used for manual /check to avoid exact duplicates in the same session.
+    """
     with sqlite3.connect(DB_FILE) as conn:
         row = conn.execute(
             "SELECT price FROM deals WHERE deal_id = ?", (deal_id,)
@@ -291,8 +315,12 @@ async def set_presence(state: str, deal_count: int = 0):
     await bot.change_presence(status=status, activity=activity)
 
 
-async def run_scan() -> int:
-    log.info("Starting deal scan...")
+async def run_scan(manual: bool = False) -> int:
+    """
+    manual=False (auto): skip deals already posted today
+    manual=True (/check): skip only exact duplicates from any time
+    """
+    log.info(f"Starting deal scan ({"manual" if manual else "auto"})...")
     await set_presence("scanning")
 
     channels = [bot.get_channel(cid) for cid in CHANNEL_IDS]
@@ -306,7 +334,8 @@ async def run_scan() -> int:
     posted = 0
 
     for deal in sorted(deals, key=lambda d: d["discount_pct"], reverse=True):
-        if already_alerted(deal["deal_id"], deal["price"]):
+        check_fn = already_alerted_ever if manual else already_alerted_today
+        if check_fn(deal["deal_id"], deal["price"]):
             continue
         for channel in channels:
             await channel.send(embed=build_embed(deal))
@@ -350,7 +379,7 @@ bot = DealBot()
 async def slash_check(interaction: discord.Interaction):
     await interaction.response.send_message("🔍 Scanning for deals, this may take a minute...")
     try:
-        posted = await run_scan()
+        posted = await run_scan(manual=True)
         if posted == 0:
             await interaction.followup.send(
                 f"😴 No new deals found right now that are ≥ **{MIN_DISCOUNT_PCT}% off** from a name brand. Try again later!"
