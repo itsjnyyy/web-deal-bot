@@ -60,14 +60,6 @@ MIN_DISCOUNT_PCT = int(get_config("MIN_DISCOUNT_PERCENT", 40))
 CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
 # ── CamelCamelCamel + Slickdeals fallback feeds ───────────────────────────────
-CAMEL_FEEDS = [
-    ("Recent Drops",   "https://camelcamelcamel.com/top_drops.rss"),
-    ("Biggest Drops",  "https://camelcamelcamel.com/top_drops.rss?t=relative"),
-    ("Electronics",    "https://camelcamelcamel.com/top_drops.rss?t=recent&c=1"),
-    ("Computers",      "https://camelcamelcamel.com/top_drops.rss?t=recent&c=2"),
-    ("Video Games",    "https://camelcamelcamel.com/top_drops.rss?t=recent&c=11"),
-]
-
 SLICKDEALS_SEARCHES = [
     "gaming mouse", "gaming keyboard", "gaming headset", "gaming monitor",
     "graphics card", "GPU RTX", "GPU RX", "SSD NVMe", "DDR5 RAM", "DDR4 RAM",
@@ -207,12 +199,18 @@ async def scrape_amazon_deals() -> list[dict]:
             for url in amazon_urls:
                 try:
                     log.info(f"  Playwright: {url[:60]}...")
-                    await page.goto(url, wait_until="networkidle", timeout=45000)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     await page.wait_for_timeout(5000)
-                    for _ in range(6):
+                    # Scroll to trigger lazy loading of deal cards
+                    for _ in range(5):
                         await page.evaluate("window.scrollBy(0, 1200)")
-                        await page.wait_for_timeout(1200)
-                    await page.wait_for_timeout(3000)
+                        await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(2000)
+                    # Wait specifically for deal cards to appear
+                    try:
+                        await page.wait_for_selector(".dcl-product-detail", timeout=10000)
+                    except Exception:
+                        pass
 
                     page_content = await page.content()
                     page_size = len(page_content)
@@ -236,35 +234,28 @@ async def scrape_amazon_deals() -> list[dict]:
                             if (cards.length > 0) {
                                 console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1200));
                             }
-                            cards.forEach(card => {
+                            cards.forEach((card, idx) => {
                                 try {
-                                    const titleEl = card.querySelector(
-                                        '.a-truncate-cut, .a-truncate, [class*="title"], h2, h3, ' +
-                                        '.a-size-base-plus, .a-size-medium, .a-size-small'
-                                    );
-                                    const title = titleEl ? titleEl.innerText.trim() : '';
-                                    const priceEl = card.querySelector(
-                                        '.a-price .a-offscreen, .a-price-whole, [class*="price"] .a-offscreen'
-                                    );
-                                    const priceText = priceEl ? priceEl.innerText.trim() : '';
-                                    const discountEl = card.querySelector(
-                                        '.savingsPercentage, [id*="savingsPercentage"], ' +
-                                        '[class*="badge"], [class*="saving"], [class*="discount"], [class*="percent"]'
-                                    );
-                                    const discountText = discountEl ? discountEl.innerText.trim() : '';
-                                    const origEl = card.querySelector(
-                                        '.a-text-strike, .a-price.a-text-price .a-offscreen, ' +
-                                        '[class*="listPrice"], [data-a-strike="true"]'
-                                    );
-                                    const origText = origEl ? origEl.innerText.trim() : '';
-                                    const linkEl = card.querySelector('a[href*="/dp/"], a[href*="amazon.com"]');
+                                    // Log full HTML of first 3 cards to see exact structure
+                                    if (idx < 3) {
+                                        console.log('FULL_CARD_' + idx + ': ' + card.outerHTML.slice(0, 2000));
+                                    }
+                                    // Get ALL text and links from the card
+                                    const allText = card.innerText || '';
+                                    const linkEl = card.querySelector('a[href]');
                                     const link = linkEl ? linkEl.href : '';
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
-                                    if (title && link) {
-                                        results.push({title, priceText, discountText, origText, link, img});
+                                    // Always push if we have a link — extract details in Python
+                                    if (link) {
+                                        results.push({
+                                            rawText: allText,
+                                            link: link,
+                                            img: img,
+                                            html: card.outerHTML.slice(0, 3000)
+                                        });
                                     }
-                                } catch(e) {}
+                                } catch(e) { console.log('CARD_ERR: ' + e.message); }
                             });
                             return results;
                         }
@@ -272,32 +263,34 @@ async def scrape_amazon_deals() -> list[dict]:
                     log.info(f"  Found {len(cards)} cards")
 
                     for item in cards:
-                        title = item.get("title", "").strip()
+                        raw_text = item.get("rawText", "").strip()
+                        link     = item.get("link", "")
+                        if not link or not raw_text:
+                            continue
+
+                        # Extract ASIN
+                        asin_m = re.search(r"/dp/([A-Z0-9]{10})", link)
+                        if not asin_m:
+                            continue
+                        deal_id = asin_m.group(1)
+                        if deal_id in found:
+                            continue
+
+                        # Use first non-empty line as title
+                        lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+                        title = lines[0] if lines else ""
                         if not title or not is_gaming_item(title):
                             continue
 
-                        discount_pct = extract_discount(
-                            item.get("discountText", "") + " " + title,
-                            item.get("priceText", ""),
-                            item.get("origText", ""),
-                        )
+                        # Extract discount % from raw text
+                        discount_pct = extract_discount(raw_text)
                         if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                             continue
 
-                        try:
-                            price = float(re.sub(r"[^\d.]", "", item.get("priceText", "0")))
-                        except ValueError:
-                            price = 0.0
-                        try:
-                            orig = float(re.sub(r"[^\d.]", "", item.get("origText", "0")))
-                        except ValueError:
-                            orig = 0.0
-
-                        link = item.get("link", "")
-                        asin_m = re.search(r"/dp/([A-Z0-9]{10})", link)
-                        deal_id = asin_m.group(1) if asin_m else re.sub(r"\W", "", title[:30])
-                        if deal_id in found:
-                            continue
+                        # Extract prices
+                        prices = [float(x) for x in re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", raw_text) if float(x) > 0]
+                        price = min(prices) if prices else 0.0
+                        orig  = max(prices) if len(prices) > 1 else 0.0
 
                         found[deal_id] = {
                             "deal_id":      deal_id,
@@ -305,7 +298,7 @@ async def scrape_amazon_deals() -> list[dict]:
                             "price":        price,
                             "orig":         orig,
                             "discount_pct": discount_pct,
-                            "url":          f"https://www.amazon.com/dp/{deal_id}" if asin_m else link,
+                            "url":          f"https://www.amazon.com/dp/{deal_id}",
                             "image_url":    item.get("img", ""),
                             "source":       "Amazon",
                         }
@@ -370,17 +363,6 @@ async def scrape_amazon_deals() -> list[dict]:
                 "image_url": "", "source": source,
             }
             log.info(f"  ✓ [{source}] {discount_pct}% off — {title[:55]}")
-
-    for cat_name, url in CAMEL_FEEDS:
-        try:
-            xml_data = await loop.run_in_executor(None, fetch_url, url)
-            root = ET.fromstring(xml_data)
-            ch = root.find("channel")
-            items = ch.findall("item") if ch is not None else []
-            log.info(f"  CamelCamelCamel '{cat_name}': {len(items)} items")
-            parse_rss(items, "CamelCamelCamel")
-        except Exception as e:
-            log.warning(f"  CamelCamelCamel ({cat_name}): {e}")
 
     for search in SLICKDEALS_SEARCHES:
         try:
