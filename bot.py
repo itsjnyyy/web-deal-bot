@@ -266,12 +266,40 @@ def build_embed(deal: dict) -> discord.Embed:
     return embed
 
 # ── Core scan ─────────────────────────────────────────────────────────────────
+async def set_presence(state: str, deal_count: int = 0):
+    """Update the bot rich presence status."""
+    if state == "scanning":
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name="for gaming deals 🔍"
+        )
+        status = discord.Status.idle
+    elif state == "found" and deal_count > 0:
+        activity = discord.Activity(
+            type=discord.ActivityType.playing,
+            name=f"{deal_count} deal(s) just dropped 🔥"
+        )
+        status = discord.Status.online
+    else:
+        with sqlite3.connect(DB_FILE) as conn:
+            total = conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0]
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name=f"for deals | {total} tracked 💸"
+        )
+        status = discord.Status.online
+    await bot.change_presence(status=status, activity=activity)
+
+
 async def run_scan() -> int:
     log.info("Starting deal scan...")
+    await set_presence("scanning")
+
     channels = [bot.get_channel(cid) for cid in CHANNEL_IDS]
     channels = [c for c in channels if c is not None]
     if not channels:
         log.error("No valid channels found from CHANNEL_ID config")
+        await set_presence("idle")
         return 0
 
     deals  = await scrape_amazon_deals()
@@ -288,6 +316,10 @@ async def run_scan() -> int:
         await asyncio.sleep(1.0)
 
     log.info(f"Done — posted {posted} new deal(s) to {len(channels)} channel(s).")
+    if posted > 0:
+        await set_presence("found", posted)
+        await asyncio.sleep(30)  # show "X deals just dropped" for 30s then revert
+    await set_presence("idle")
     return posted
 
 # ── Background loop ───────────────────────────────────────────────────────────
@@ -372,6 +404,7 @@ async def on_ready():
     db_init()
     deal_loop.start()
     log.info(f"Logged in as {bot.user}  |  Min {MIN_DISCOUNT_PCT}% off  |  Every {CHECK_HOURS}h")
+    await set_presence("idle")
     for cid in CHANNEL_IDS:
         channel = bot.get_channel(cid)
         if channel:
