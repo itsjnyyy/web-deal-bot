@@ -61,15 +61,49 @@ CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
 # ── CamelCamelCamel + Slickdeals fallback feeds ───────────────────────────────
 SLICKDEALS_SEARCHES = [
+    # Peripherals
     "gaming mouse", "gaming keyboard", "gaming headset", "gaming monitor",
-    "graphics card", "GPU RTX", "GPU RX", "SSD NVMe", "DDR5 RAM", "DDR4 RAM",
-    "gaming laptop", "Logitech G", "Razer gaming", "Corsair gaming",
-    "ASUS ROG", "MSI gaming", "PS5 controller", "DualSense",
-    "Xbox controller", "Xbox Elite", "Switch Pro controller", "8BitDo",
-    "racing wheel", "Thrustmaster", "Fanatec", "Logitech G29", "Logitech G923",
-    "PS5 headset", "Xbox headset", "Turtle Beach", "SteelSeries Arctis",
-    "capture card", "Elgato", "AVerMedia", "NZXT", "Lian Li",
-    "Samsung 990 SSD", "WD Black SSD",
+    "mechanical keyboard", "wireless gaming mouse", "gaming mousepad",
+    # GPUs
+    "RTX 4060", "RTX 4070", "RTX 4080", "RTX 4090",
+    "RTX 5070", "RTX 5080", "RTX 5090",
+    "RX 7600", "RX 7700", "RX 7800", "RX 7900",
+    "graphics card sale", "GPU deal",
+    # Storage & RAM
+    "Samsung 990 Pro", "Samsung 980 Pro", "WD Black SN850",
+    "Seagate FireCuda", "Crucial T700", "Kingston Fury Renegade",
+    "DDR5 RAM", "DDR4 RAM", "G.Skill Trident",
+    # Brands — direct
+    "Logitech G502", "Logitech G Pro", "Logitech G29", "Logitech G923", "Logitech G733",
+    "Razer DeathAdder", "Razer BlackShark", "Razer Huntsman", "Razer Basilisk",
+    "Corsair K70", "Corsair HS80", "Corsair Virtuoso", "Corsair Vengeance",
+    "SteelSeries Arctis", "SteelSeries Apex", "SteelSeries Rival",
+    "HyperX Cloud", "HyperX Alloy", "HyperX Pulsefire",
+    "ASUS ROG", "ASUS TUF gaming", "MSI gaming",
+    "Alienware monitor", "LG UltraGear", "Samsung Odyssey",
+    "BenQ gaming", "AOC gaming monitor",
+    # Monitors
+    "gaming monitor 144hz", "gaming monitor 165hz", "gaming monitor 240hz",
+    "4K gaming monitor", "ultrawide gaming monitor", "curved gaming monitor",
+    # Controllers & Console
+    "DualSense controller", "PS5 controller", "Xbox Elite Series 2",
+    "Xbox Series controller", "8BitDo controller", "SCUF controller",
+    "Switch Pro controller", "Nintendo Switch OLED",
+    # Steering wheels
+    "Logitech G923", "Logitech G29", "Thrustmaster T300",
+    "Thrustmaster TX", "Fanatec CSL", "racing wheel deal",
+    # Headsets
+    "Astro A50", "Turtle Beach Stealth", "SteelSeries Arctis Nova",
+    "Razer Kaira", "Xbox wireless headset", "PS5 Pulse 3D",
+    # Cases & Cooling
+    "NZXT H510", "Lian Li Lancool", "Fractal Design",
+    "Cooler Master case", "Phanteks Eclipse", "be quiet case",
+    "AIO liquid cooler", "Noctua cooler", "DeepCool cooler",
+    # Capture & Streaming
+    "Elgato 4K60", "AVerMedia capture card", "Elgato Stream Deck",
+    # Laptops
+    "ASUS ROG laptop", "Razer Blade laptop", "MSI gaming laptop",
+    "Alienware laptop", "Acer Predator laptop", "Lenovo Legion laptop",
 ]
 
 # ── Gaming brand + keyword filter ─────────────────────────────────────────────
@@ -208,7 +242,10 @@ async def scrape_amazon_deals() -> list[dict]:
                     await page.wait_for_timeout(2000)
                     # Wait specifically for deal cards to appear
                     try:
-                        await page.wait_for_selector(".dcl-product-detail", timeout=10000)
+                        await page.wait_for_selector(
+                            ".dcl-product-detail, [data-component-type='s-search-result']",
+                            timeout=10000
+                        )
                     except Exception:
                         pass
 
@@ -222,23 +259,31 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            const cards = [...document.querySelectorAll('.dcl-product-detail')];
+                            // Handle both deals pages (dcl-product-detail) and search results (s-result-item)
+                    const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
+                    const searchCards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
+                    const cards = dealCards.length > 0 ? dealCards : searchCards;
                             console.log('DEAL_CARDS_FOUND: ' + cards.length);
                             if (cards.length > 0) {
                             }
                             cards.forEach((card, idx) => {
                                 try {
-                                    // Get link by walking parent chain
+                                    // Get link — check data-asin first (search results), then walk parents
                                     let link = '';
-                                    let node = card;
-                                    for (let i = 0; i < 5; i++) {
-                                        if (!node) break;
-                                        if (node.tagName === 'A' && node.href) { link = node.href; break; }
-                                        const a = node.querySelector('a[href*="/dp/"]') ||
-                                                  node.querySelector('a[href*="amazon.com"]') ||
-                                                  node.querySelector('a[href]');
-                                        if (a) { link = a.href; break; }
-                                        node = node.parentElement;
+                                    const asinAttr = card.getAttribute('data-asin');
+                                    if (asinAttr) {
+                                        link = 'https://www.amazon.com/dp/' + asinAttr;
+                                    } else {
+                                        let node = card;
+                                        for (let i = 0; i < 5; i++) {
+                                            if (!node) break;
+                                            if (node.tagName === 'A' && node.href) { link = node.href; break; }
+                                            const a = node.querySelector('a[href*="/dp/"]') ||
+                                                      node.querySelector('a[href*="amazon.com"]') ||
+                                                      node.querySelector('a[href]');
+                                            if (a) { link = a.href; break; }
+                                            node = node.parentElement;
+                                        }
                                     }
 
                                     // Get image + alt text (often contains product title)
