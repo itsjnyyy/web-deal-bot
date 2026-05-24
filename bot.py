@@ -279,6 +279,7 @@ async def scrape_amazon_deals() -> list[dict]:
                             const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
                             const searchCards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
                             const cards = dealCards.length > 0 ? dealCards : searchCards;
+                            console.log('COUNTS: deal=' + dealCards.length + ' search=' + searchCards.length);
                             cards.forEach((card) => {
                                 try {
                                     // Search result cards have data-asin directly
@@ -490,7 +491,16 @@ async def set_presence(state, deal_count=0):
 
 
 # ── Core scan ─────────────────────────────────────────────────────────────────
+_scan_lock = asyncio.Lock()
+
 async def run_scan(manual=False):
+    if _scan_lock.locked():
+        log.info("Scan already in progress, skipping.")
+        return 0
+    async with _scan_lock:
+        return await _do_scan(manual)
+
+async def _do_scan(manual=False):
     log.info(f"Starting {'manual' if manual else 'auto'} scan...")
     await set_presence("scanning")
 
@@ -521,6 +531,7 @@ async def run_scan(manual=False):
         await asyncio.sleep(30)
     await set_presence("idle")
     return posted
+
 
 
 # ── Background loop ───────────────────────────────────────────────────────────
