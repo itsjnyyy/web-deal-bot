@@ -1,7 +1,7 @@
 """
-Amazon Gaming Deal Monitor — Discord Bot (Free Version)
-Uses Playwright to scrape Amazon's Today's Deals page.
-Slash commands only. No API key required.
+Amazon Gaming Deal Monitor — Discord Bot
+Scrapes Slickdeals RSS feeds (cloud-friendly, no API key needed).
+Slash commands only.
 """
 
 import asyncio
@@ -12,25 +12,14 @@ import re
 import sqlite3
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import discord
 from discord import app_commands
 from discord.ext import tasks
-from playwright.async_api import async_playwright
-
-# ── Install Chromium at runtime (required on Railway) ─────────────────────────
-print("Installing Playwright Chromium browser...", flush=True)
-_install = subprocess.run(
-    [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-    capture_output=False,
-)
-if _install.returncode != 0:
-    subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium"],
-        capture_output=False,
-    )
-print("Chromium ready.", flush=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -51,8 +40,6 @@ def get_config(key, default=None):
     except FileNotFoundError:
         return default
 
-DISCORD_TOKEN    = get_config("DISCORD_TOKEN")
-# Supports one or multiple channels: "123" or "123,456,789"
 CHANNEL_IDS = [
     int(cid.strip())
     for cid in get_config("CHANNEL_ID", "0").split(",")
@@ -61,10 +48,12 @@ CHANNEL_IDS = [
 MIN_DISCOUNT_PCT = int(get_config("MIN_DISCOUNT_PERCENT", 40))
 CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
-# ── Amazon deal URLs ──────────────────────────────────────────────────────────
-DEAL_URLS = [
-    "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22viewIndex%22%3A0%2C%22presetId%22%3A%22deals-collection-all-deals%22%2C%22sorting%22%3A%22BY_SCORE%22%7D",
-    "https://www.amazon.com/gp/goldbox",
+# ── Slickdeals search terms ───────────────────────────────────────────────────
+SLICKDEALS_SEARCHES = [
+    "gaming monitor", "gaming keyboard", "gaming mouse", "gaming headset",
+    "graphics card", "GPU", "gaming laptop", "SSD", "RAM DDR",
+    "gaming chair", "gaming controller", "CPU processor", "PC case",
+    "mechanical keyboard", "wireless mouse", "gaming microphone",
 ]
 
 # ── Gaming brand filter ───────────────────────────────────────────────────────
@@ -120,125 +109,92 @@ def record_deal(deal_id, title, price, discount):
             (deal_id, title, price, discount, datetime.utcnow().isoformat()),
         )
 
-# ── Amazon scraper ────────────────────────────────────────────────────────────
+# ── Slickdeals scraper ────────────────────────────────────────────────────────
 async def scrape_amazon_deals() -> list[dict]:
+    """
+    Fetches Slickdeals RSS feeds for each gaming search term.
+    Slickdeals aggregates Amazon deals and works reliably from cloud IPs.
+    """
     found = {}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    }
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 900},
-            locale="en-US",
-        )
-        page = await context.new_page()
-        await page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf}", lambda r: r.abort())
+    loop = asyncio.get_event_loop()
 
-        for url in DEAL_URLS:
-            try:
-                log.info(f"Scraping: {url[:60]}...")
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(3000)
+    def fetch_feed(search):
+        url = f"https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&q={urllib.parse.quote(search)}&rss=1"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read()
 
-                for _ in range(3):
-                    await page.evaluate("window.scrollBy(0, 1500)")
-                    await page.wait_for_timeout(1000)
+    for search in SLICKDEALS_SEARCHES:
+        try:
+            xml_data = await loop.run_in_executor(None, fetch_feed, search)
+            root = ET.fromstring(xml_data)
+            channel_el = root.find("channel")
+            items = channel_el.findall("item") if channel_el is not None else []
+            log.info(f"  Slickdeals '{search}': {len(items)} results")
 
-                deals_data = await page.evaluate("""
-                    () => {
-                        const results = [];
-                        const cards = document.querySelectorAll(
-                            '[data-testid="deal-card"], .DealCard, [class*="DealCard"], .octopus-dlp-item-section'
-                        );
-                        cards.forEach(card => {
-                            try {
-                                const titleEl = card.querySelector(
-                                    '[data-testid="deal-card-title"], .a-truncate-cut, [class*="title"], h2, .a-size-base-plus'
-                                );
-                                const title = titleEl ? titleEl.innerText.trim() : '';
-                                const priceEl = card.querySelector(
-                                    '.a-price .a-offscreen, [data-testid="deal-price"], .dealPriceBadge, [class*="DealPrice"]'
-                                );
-                                const priceText = priceEl ? priceEl.innerText.trim() : '';
-                                const discountEl = card.querySelector(
-                                    '[class*="badge"], [class*="discount"], [class*="saving"], .savingsPercentage'
-                                );
-                                const discountText = discountEl ? discountEl.innerText.trim() : '';
-                                const origEl = card.querySelector(
-                                    '.a-text-strike, [class*="original"], [class*="list-price"]'
-                                );
-                                const origText = origEl ? origEl.innerText.trim() : '';
-                                const linkEl = card.querySelector('a[href]');
-                                const link = linkEl ? linkEl.href : '';
-                                const imgEl = card.querySelector('img');
-                                const img = imgEl ? imgEl.src : '';
-                                if (title && (priceText || discountText)) {
-                                    results.push({ title, priceText, discountText, origText, link, img });
-                                }
-                            } catch(e) {}
-                        });
-                        return results;
-                    }
-                """)
+            for item in items:
+                title = (item.findtext("title") or "").strip()
+                link  = (item.findtext("link")  or "").strip()
+                desc  = (item.findtext("description") or "").strip()
 
-                log.info(f"  Found {len(deals_data)} raw cards")
+                if not title or not link:
+                    continue
+                if not is_gaming_brand(title):
+                    continue
 
-                for item in deals_data:
-                    title = item.get("title", "")
-                    if not title or not is_gaming_brand(title):
-                        continue
-
-                    discount_pct = None
-                    match = re.search(r"(\d+)\s*%", item.get("discountText", ""))
+                # Parse discount % from title or description
+                discount_pct = None
+                for text in [title, desc]:
+                    match = re.search(r"(\d+)\s*%\s*off", text, re.IGNORECASE)
                     if match:
                         discount_pct = int(match.group(1))
+                        break
 
-                    if discount_pct is None:
-                        price_str = re.sub(r"[^\d.]", "", item.get("priceText", ""))
-                        orig_str  = re.sub(r"[^\d.]", "", item.get("origText", ""))
-                        if price_str and orig_str:
-                            try:
-                                price = float(price_str)
-                                orig  = float(orig_str)
-                                if orig > price > 0:
-                                    discount_pct = round((1 - price / orig) * 100)
-                            except ValueError:
-                                pass
+                # Try calculating from prices e.g. "$29.99 (reg $59.99)"
+                if discount_pct is None:
+                    prices = re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", title + " " + desc)
+                    if len(prices) >= 2:
+                        try:
+                            sale = float(prices[0])
+                            orig = float(prices[1])
+                            if orig > sale > 0:
+                                discount_pct = round((1 - sale / orig) * 100)
+                        except ValueError:
+                            pass
 
-                    if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
-                        continue
+                if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
+                    continue
 
-                    try:
-                        price = float(re.sub(r"[^\d.]", "", item.get("priceText", "0")))
-                    except ValueError:
-                        price = 0.0
-                    try:
-                        orig = float(re.sub(r"[^\d.]", "", item.get("origText", "0")))
-                    except ValueError:
-                        orig = 0.0
+                # Extract prices
+                prices = re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", title + " " + desc)
+                try:
+                    price = float(prices[0]) if prices else 0.0
+                    orig  = float(prices[1]) if len(prices) > 1 else 0.0
+                except (ValueError, IndexError):
+                    price, orig = 0.0, 0.0
 
-                    link = item.get("link", "")
-                    asin_match = re.search(r"/dp/([A-Z0-9]{10})", link)
-                    deal_id = asin_match.group(1) if asin_match else re.sub(r"\W", "", title[:30])
+                deal_id = re.sub(r"[^\w]", "", link[-40:])
+                if deal_id in found:
+                    continue
 
-                    if deal_id in found:
-                        continue
+                found[deal_id] = {
+                    "deal_id":      deal_id,
+                    "title":        title,
+                    "price":        price,
+                    "orig":         orig,
+                    "discount_pct": discount_pct,
+                    "url":          link,
+                    "image_url":    "",
+                }
+                log.info(f"  ✓ {discount_pct}% off — {title[:60]}")
 
-                    found[deal_id] = {
-                        "deal_id":      deal_id,
-                        "title":        title,
-                        "price":        price,
-                        "orig":         orig,
-                        "discount_pct": discount_pct,
-                        "url":          link or f"https://www.amazon.com/dp/{deal_id}",
-                        "image_url":    item.get("img", ""),
-                    }
-                    log.info(f"  ✓ {discount_pct}% off — {title[:55]}")
-
-            except Exception as exc:
-                log.warning(f"Error scraping {url[:50]}: {exc}")
-
-        await browser.close()
+        except Exception as exc:
+            log.warning(f"Slickdeals error for '{search}': {exc}")
 
     log.info(f"Scrape complete. {len(found)} qualifying deal(s).")
     return list(found.values())
@@ -263,45 +219,24 @@ def build_embed(deal: dict) -> discord.Embed:
         timestamp = datetime.utcnow(),
     )
     if price > 0:
-        embed.add_field(name="💰 Sale Price", value=f"**${price:.2f}**",      inline=True)
+        embed.add_field(name="💰 Sale Price", value=f"**${price:.2f}**",       inline=True)
     if orig > 0:
-        embed.add_field(name="📦 Was",        value=f"~~${orig:.2f}~~",       inline=True)
+        embed.add_field(name="📦 Was",        value=f"~~${orig:.2f}~~",        inline=True)
     if price > 0 and orig > 0:
-        embed.add_field(name="💸 You Save",   value=f"**${orig-price:.2f}**", inline=True)
-    if deal.get("deal_id") and len(deal["deal_id"]) == 10:
-        embed.add_field(
-            name="📈 Price History",
-            value=f"[CamelCamelCamel](https://camelcamelcamel.com/product/{deal['deal_id']})",
-            inline=True,
-        )
-    embed.add_field(name="🛒 Buy Now", value=f"[View on Amazon]({deal['url']})", inline=True)
+        embed.add_field(name="💸 You Save",   value=f"**${orig - price:.2f}**", inline=True)
+    embed.add_field(name="🛒 View Deal", value=f"[Slickdeals]({deal['url']})", inline=True)
     if deal.get("image_url"):
         embed.set_thumbnail(url=deal["image_url"])
-    embed.set_footer(text=f"Amazon Gaming Deals  •  Updates every {CHECK_HOURS}h  •  Min {MIN_DISCOUNT_PCT}% off")
+    embed.set_footer(text=f"Amazon Gaming Deals via Slickdeals  •  Every {CHECK_HOURS}h  •  Min {MIN_DISCOUNT_PCT}% off")
     return embed
 
-# ── Bot setup ─────────────────────────────────────────────────────────────────
-intents = discord.Intents.default()
-
-class DealBot(discord.Client):
-    def __init__(self):
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
-
-    async def setup_hook(self):
-        await self.tree.sync()
-        log.info("Slash commands synced globally")
-
-bot = DealBot()
-
-# ── Core scan function (used by both the loop and /check) ─────────────────────
+# ── Core scan ─────────────────────────────────────────────────────────────────
 async def run_scan() -> int:
-    """Scrapes Amazon, posts new deals to the channel. Returns count of new deals posted."""
     log.info("Starting deal scan...")
     channels = [bot.get_channel(cid) for cid in CHANNEL_IDS]
     channels = [c for c in channels if c is not None]
     if not channels:
-        log.error(f"No valid channels found from CHANNEL_ID config")
+        log.error("No valid channels found from CHANNEL_ID config")
         return 0
 
     deals  = await scrape_amazon_deals()
@@ -320,7 +255,7 @@ async def run_scan() -> int:
     log.info(f"Done — posted {posted} new deal(s) to {len(channels)} channel(s).")
     return posted
 
-# ── Background scan loop ──────────────────────────────────────────────────────
+# ── Background loop ───────────────────────────────────────────────────────────
 @tasks.loop(hours=CHECK_HOURS)
 async def deal_loop():
     await run_scan()
@@ -329,10 +264,24 @@ async def deal_loop():
 async def before_loop():
     await bot.wait_until_ready()
 
+# ── Bot setup ─────────────────────────────────────────────────────────────────
+intents = discord.Intents.default()
+
+class DealBot(discord.Client):
+    def __init__(self):
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+        log.info("Slash commands synced globally")
+
+bot = DealBot()
+
 # ── Slash commands ────────────────────────────────────────────────────────────
-@bot.tree.command(name="check", description="Force an immediate Amazon deal scan")
+@bot.tree.command(name="check", description="Force an immediate deal scan")
 async def slash_check(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 Scanning Amazon for deals, this may take up to a minute...")
+    await interaction.response.send_message("🔍 Scanning for deals, this may take a minute...")
     try:
         posted = await run_scan()
         if posted == 0:
@@ -368,9 +317,9 @@ async def slash_stats(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="Show available bot commands")
 async def slash_help(interaction: discord.Interaction):
     embed = discord.Embed(title="🎮 Gaming Deal Bot Commands", color=discord.Color.green())
-    embed.add_field(name="/check", value="Force a deal scan right now",                inline=False)
-    embed.add_field(name="/stats", value="Show total deals tracked + recent alerts",   inline=False)
-    embed.add_field(name="/help",  value="Show this help message",                     inline=False)
+    embed.add_field(name="/check", value="Force a deal scan right now",               inline=False)
+    embed.add_field(name="/stats", value="Show total deals tracked + recent alerts",  inline=False)
+    embed.add_field(name="/help",  value="Show this help message",                    inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.error
@@ -388,14 +337,14 @@ async def on_ready():
     db_init()
     deal_loop.start()
     log.info(f"Logged in as {bot.user}  |  Min {MIN_DISCOUNT_PCT}% off  |  Every {CHECK_HOURS}h")
-    for _cid in CHANNEL_IDS:
-        channel = bot.get_channel(_cid)
+    for cid in CHANNEL_IDS:
+        channel = bot.get_channel(cid)
         if channel:
             await channel.send(
-            f"🤖 **Amazon Gaming Deal Monitor online!**\n"
-            f"Scanning Amazon deals every **{CHECK_HOURS}h** for name-brand items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
-            f"Use `/check` to scan now, `/stats` to see tracked deals."
-        )
+                f"🤖 **Amazon Gaming Deal Monitor online!**\n"
+                f"Scanning Slickdeals every **{CHECK_HOURS}h** for name-brand gaming items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
+                f"Use `/check` to scan now, `/stats` to see tracked deals."
+            )
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
