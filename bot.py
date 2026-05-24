@@ -197,20 +197,22 @@ async def scrape_amazon_deals() -> list[dict]:
                 timezone_id="America/New_York",
             )
             page = await context.new_page()
+            page.on("console", lambda msg: log.info(f"  BROWSER: {msg.text[:200]}") if any(x in msg.text for x in ["CARD_", "Deal-"]) else None)
             await Stealth().apply_stealth_async(page)
 
             # Visit homepage first to look human
             await page.goto("https://www.amazon.com", wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
             for url in amazon_urls:
                 try:
                     log.info(f"  Playwright: {url[:60]}...")
-                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    await page.wait_for_timeout(4000)
-                    for _ in range(4):
-                        await page.evaluate("window.scrollBy(0, 1500)")
-                        await page.wait_for_timeout(800)
+                    await page.goto(url, wait_until="networkidle", timeout=45000)
+                    await page.wait_for_timeout(5000)
+                    for _ in range(6):
+                        await page.evaluate("window.scrollBy(0, 1200)")
+                        await page.wait_for_timeout(1200)
+                    await page.wait_for_timeout(3000)
 
                     page_content = await page.content()
                     page_size = len(page_content)
@@ -218,29 +220,21 @@ async def scrape_amazon_deals() -> list[dict]:
                     if page_size < 50000:
                         log.warning("  Page too small — likely blocked")
                         continue
-                    # Log a snippet of class names to help debug selectors
-                    class_snippet = await page.evaluate("""
-                        () => [...new Set([...document.querySelectorAll('[class]')]
-                            .map(el => [...el.classList]).flat()
-                            .filter(c => /deal|item|grid|card|product/i.test(c))
-                        )].slice(0, 30).join(', ')
+                    # Log data-testid values to find deal card identifiers
+                    testids = await page.evaluate("""
+                        () => [...new Set([...document.querySelectorAll('[data-testid]')]
+                            .map(el => el.getAttribute('data-testid'))
+                        )].slice(0, 40).join(', ')
                     """)
-                    log.info(f"  Relevant classes: {class_snippet[:200]}")
+                    log.info(f"  data-testid values: {testids[:300]}")
 
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            // Dump page structure to help debug
-                    const allClasses = [...new Set([...document.querySelectorAll('[class]')]
-                        .map(el => el.className.split(' ')).flat()
-                        .filter(c => c.toLowerCase().includes('deal') || c.toLowerCase().includes('grid') || c.toLowerCase().includes('item'))
-                    )].slice(0, 20);
-                    console.log('Deal-related classes:', allClasses.join(', '));
-
-                    const cards = document.querySelectorAll(
+                            const cards = document.querySelectorAll(
                         '[data-testid="deal-card"], ' +
                         '[data-testid*="deal"], ' +
-                        '.DealCard, ' +
+                        '._Y29, ' +
                         '[class*="DealCard"], ' +
                         '[class*="dealCard"], ' +
                         '[class*="GridItem"], ' +
@@ -249,6 +243,12 @@ async def scrape_amazon_deals() -> list[dict]:
                         '[data-deal-id], ' +
                         '[data-testid="grid-unit"]'
                     );
+                    // Debug: log what the first card actually looks like
+                    if (cards.length > 0) {
+                        const sample = cards[0];
+                        console.log('CARD_HTML:', sample.innerHTML.slice(0, 500));
+                        console.log('CARD_CLASSES:', sample.className);
+                    }
                             cards.forEach(card => {
                                 try {
                                     // Try many possible title selectors
