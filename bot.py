@@ -231,23 +231,29 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            const cards = document.querySelectorAll(
-                        '[data-testid="deal-card"], ' +
-                        '[data-testid*="deal"], ' +
-                        '._Y29, ' +
-                        '[class*="DealCard"], ' +
-                        '[class*="dealCard"], ' +
-                        '[class*="GridItem"], ' +
-                        '[class*="dealGridItem"], ' +
-                        '.octopus-dlp-item-section, ' +
-                        '[data-deal-id], ' +
-                        '[data-testid="grid-unit"]'
-                    );
-                    // Debug: log what the first card actually looks like
-                    if (cards.length > 0) {
-                        const sample = cards[0];
-                        console.log('CARD_HTML:', sample.innerHTML.slice(0, 500));
-                        console.log('CARD_CLASSES:', sample.className);
+                            // Target the deals grid container directly
+                    const grid = document.querySelector('[data-testid="discount-asin-grid"]');
+                    let cards = [];
+                    if (grid) {
+                        // Get all direct children or nested item containers
+                        cards = [...grid.querySelectorAll(
+                            '[class*="item"], [class*="Item"], [class*="card"], [class*="Card"], ' +
+                            '[class*="grid"], li, article, [role="listitem"]'
+                        )];
+                        // If nothing found inside grid, use grid children directly
+                        if (cards.length === 0) {
+                            cards = [...grid.children];
+                        }
+                        console.log('GRID_FOUND: ' + cards.length + ' items inside discount-asin-grid');
+                        if (cards.length > 0) {
+                            console.log('CARD_HTML:', cards[0].innerHTML.slice(0, 800));
+                            console.log('CARD_CLASSES:', cards[0].className);
+                        }
+                    } else {
+                        console.log('GRID_NOT_FOUND: discount-asin-grid not in DOM');
+                        // Fallback — grab anything with a price and a link
+                        cards = [...document.querySelectorAll('[class*="Carousel"] [class*="item"]')];
+                        console.log('FALLBACK_CARDS:', cards.length);
                     }
                             cards.forEach(card => {
                                 try {
