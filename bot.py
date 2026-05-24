@@ -209,9 +209,26 @@ async def scrape_amazon_deals() -> list[dict]:
     found = {}
 
     # ── Primary: Playwright stealth ───────────────────────────────────────────
+    # p_n_pct-off-with-tax:2250765011 = any discount filter on Amazon search
     amazon_urls = [
+        # Featured deals pages
         "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22viewIndex%22%3A0%2C%22presetId%22%3A%22deals-collection-all-deals%22%2C%22sorting%22%3A%22BY_SCORE%22%7D",
         "https://www.amazon.com/gp/goldbox",
+        # Brand searches filtered to discounted items only
+        "https://www.amazon.com/s?k=logitech+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=razer+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=corsair+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=asus+rog&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=steelseries&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=hyperx+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=msi+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=gaming+monitor&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=graphics+card+rtx&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=gaming+headset&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=racing+wheel+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=nvme+ssd&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=gaming+keyboard+mechanical&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=gaming+mouse+wireless&rh=p_n_pct-off-with-tax%3A2250765011",
     ]
     try:
         async with async_playwright() as p:
