@@ -231,29 +231,32 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
-                            // Target the deals grid container directly
-                    const grid = document.querySelector('[data-testid="discount-asin-grid"]');
-                    let cards = [];
-                    if (grid) {
-                        // Get all direct children or nested item containers
-                        cards = [...grid.querySelectorAll(
-                            '[class*="item"], [class*="Item"], [class*="card"], [class*="Card"], ' +
-                            '[class*="grid"], li, article, [role="listitem"]'
-                        )];
-                        // If nothing found inside grid, use grid children directly
-                        if (cards.length === 0) {
-                            cards = [...grid.children];
+                            // Find all elements with a price — these are product cards
+                    const priceEls = [...document.querySelectorAll('.a-price')];
+                    // Walk up to find the card container for each price
+                    const cardSet = new Set();
+                    priceEls.forEach(el => {
+                        let node = el;
+                        for (let i = 0; i < 6; i++) {
+                            node = node.parentElement;
+                            if (!node) break;
+                            const cls = node.className || '';
+                            const tag = node.tagName || '';
+                            if (cls.includes('Card') || cls.includes('card') ||
+                                cls.includes('Item') || cls.includes('item') ||
+                                cls.includes('Product') || cls.includes('product') ||
+                                cls.includes('Deal') || cls.includes('deal') ||
+                                tag === 'LI' || tag === 'ARTICLE') {
+                                cardSet.add(node);
+                                break;
+                            }
                         }
-                        console.log('GRID_FOUND: ' + cards.length + ' items inside discount-asin-grid');
-                        if (cards.length > 0) {
-                            console.log('CARD_HTML:', cards[0].innerHTML.slice(0, 800));
-                            console.log('CARD_CLASSES:', cards[0].className);
-                        }
-                    } else {
-                        console.log('GRID_NOT_FOUND: discount-asin-grid not in DOM');
-                        // Fallback — grab anything with a price and a link
-                        cards = [...document.querySelectorAll('[class*="Carousel"] [class*="item"]')];
-                        console.log('FALLBACK_CARDS:', cards.length);
+                    });
+                    const cards = [...cardSet];
+                    console.log('PRICE_BASED_CARDS: ' + cards.length);
+                    if (cards.length > 0) {
+                        console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1000));
+                        console.log('CARD_CLASSES:', cards[0].className);
                     }
                             cards.forEach(card => {
                                 try {
