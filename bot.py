@@ -337,7 +337,7 @@ async def slash_check(interaction: discord.Interaction):
         posted = await run_scan()
         if posted == 0:
             await interaction.followup.send(
-                "😴 No new deals found right now that are ≥ **40% off** from a name brand. Try again later!"
+                f"😴 No new deals found right now that are ≥ **{MIN_DISCOUNT_PCT}% off** from a name brand. Try again later!"
             )
         else:
             await interaction.followup.send(
