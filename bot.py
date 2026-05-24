@@ -236,25 +236,51 @@ async def scrape_amazon_deals() -> list[dict]:
                             }
                             cards.forEach((card, idx) => {
                                 try {
-                                    // Log full HTML of first 3 cards to see exact structure
-                                    if (idx < 3) {
-                                        console.log('FULL_CARD_' + idx + ': ' + card.outerHTML.slice(0, 2000));
-                                    }
-                                    // Get ALL text and links from the card
                                     const allText = card.innerText || '';
-                                    const linkEl = card.querySelector('a[href]');
-                                    const link = linkEl ? linkEl.href : '';
+
+                                    // Link: check card itself, parent chain, or any descendant
+                                    let link = '';
+                                    // Check parents up 5 levels for an anchor or ASIN
+                                    let node = card;
+                                    for (let i = 0; i < 5; i++) {
+                                        if (!node) break;
+                                        if (node.tagName === 'A' && node.href) { link = node.href; break; }
+                                        const a = node.querySelector('a[href*="/dp/"]') ||
+                                                  node.querySelector('a[href*="amazon.com"]') ||
+                                                  node.querySelector('a[href]');
+                                        if (a) { link = a.href; break; }
+                                        node = node.parentElement;
+                                    }
+
+                                    // Also try data attributes for ASIN
+                                    if (!link) {
+                                        node = card;
+                                        for (let i = 0; i < 5; i++) {
+                                            if (!node) break;
+                                            const asin = node.getAttribute('data-asin') ||
+                                                         node.getAttribute('data-csa-c-element-id') ||
+                                                         node.getAttribute('data-deal-id');
+                                            if (asin && /^[A-Z0-9]{10}$/.test(asin)) {
+                                                link = 'https://www.amazon.com/dp/' + asin;
+                                                break;
+                                            }
+                                            node = node.parentElement;
+                                        }
+                                    }
+
+                                    if (idx < 2) {
+                                        console.log('CARD_LINK_' + idx + ': ' + link);
+                                        console.log('CARD_TEXT_' + idx + ': ' + allText.slice(0, 300));
+                                    }
+
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
-                                    // Always push if we have a link — extract details in Python
-                                    if (link) {
-                                        results.push({
-                                            rawText: allText,
-                                            link: link,
-                                            img: img,
-                                            html: card.outerHTML.slice(0, 3000)
-                                        });
-                                    }
+
+                                    results.push({
+                                        rawText: allText,
+                                        link: link,
+                                        img: img,
+                                    });
                                 } catch(e) { console.log('CARD_ERR: ' + e.message); }
                             });
                             return results;
