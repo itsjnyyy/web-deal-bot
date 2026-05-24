@@ -309,21 +309,14 @@ async def scrape_amazon_deals() -> list[dict]:
                         if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                             continue
 
-                        aria  = item.get("ariaLabel", "").strip()
-                        alt   = item.get("imgAlt", "").strip()
-                        skip_patterns = re.compile(r"^[0-9]+%|^[$]|^List|^Limited|^Deal|^Save|^[0-9]+$|off$", re.IGNORECASE)
-                        title = ""
-                        # Try aria-label first, then alt, then parse from raw text
-                        for candidate in [aria, alt]:
-                            if candidate and len(candidate) > 10 and not skip_patterns.match(candidate):
-                                title = candidate
-                                break
-                        if not title:
-                            lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-                            for line in lines:
-                                if len(line) > 15 and not skip_patterns.match(line):
-                                    title = line
-                                    break
+                        # Extract title from URL slug — Amazon puts it there even when
+                        # it's stripped from the card HTML
+                        # e.g. /Traeger-TFB57PZBO-Bronze-Pellet-Grill/dp/B07GLK1NC2
+                        url_title_m = re.search(r"amazon\.com/([^/]+)/dp/[A-Z0-9]{10}", link)
+                        if url_title_m:
+                            title = url_title_m.group(1).replace("-", " ").strip()
+                        else:
+                            title = ""
 
                         if not title or not is_gaming_item(title):
                             continue
