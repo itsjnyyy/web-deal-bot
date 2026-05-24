@@ -218,13 +218,6 @@ async def scrape_amazon_deals() -> list[dict]:
                     if page_size < 50000:
                         log.warning("  Page too small — likely blocked")
                         continue
-                    # Log data-testid values to find deal card identifiers
-                    testids = await page.evaluate("""
-                        () => [...new Set([...document.querySelectorAll('[data-testid]')]
-                            .map(el => el.getAttribute('data-testid'))
-                        )].slice(0, 40).join(', ')
-                    """)
-                    log.info(f"  data-testid values: {testids[:300]}")
 
                     cards = await page.evaluate("""
                         () => {
@@ -232,7 +225,6 @@ async def scrape_amazon_deals() -> list[dict]:
                             const cards = [...document.querySelectorAll('.dcl-product-detail')];
                             console.log('DEAL_CARDS_FOUND: ' + cards.length);
                             if (cards.length > 0) {
-                                console.log('CARD_HTML:', cards[0].outerHTML.slice(0, 1200));
                             }
                             cards.forEach((card, idx) => {
                                 try {
@@ -268,13 +260,6 @@ async def scrape_amazon_deals() -> list[dict]:
 
                                     // Get all text including hidden spans
                                     const allText = card.innerText || '';
-
-                                    if (idx < 2) {
-                                        console.log('CARD_LINK_' + idx + ': ' + link);
-                                        console.log('CARD_ALT_' + idx + ': ' + imgAlt.slice(0, 200));
-                                        console.log('CARD_ARIA_' + idx + ': ' + ariaLabel.slice(0, 200));
-                                        console.log('CARD_TEXT_' + idx + ': ' + allText.slice(0, 200));
-                                    }
 
                                     results.push({
                                         rawText: allText,
