@@ -61,11 +61,11 @@ CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
 # ── CamelCamelCamel + Slickdeals fallback feeds ───────────────────────────────
 CAMEL_FEEDS = [
-    ("Electronics",  "https://camelcamelcamel.com/top_drops/amazon/1/xml"),
-    ("Computers",    "https://camelcamelcamel.com/top_drops/amazon/2/xml"),
-    ("Video Games",  "https://camelcamelcamel.com/top_drops/amazon/11/xml"),
-    ("Camera",       "https://camelcamelcamel.com/top_drops/amazon/3/xml"),
-    ("Software",     "https://camelcamelcamel.com/top_drops/amazon/4/xml"),
+    ("Recent Drops",   "https://camelcamelcamel.com/top_drops.rss"),
+    ("Biggest Drops",  "https://camelcamelcamel.com/top_drops.rss?t=relative"),
+    ("Electronics",    "https://camelcamelcamel.com/top_drops.rss?t=recent&c=1"),
+    ("Computers",      "https://camelcamelcamel.com/top_drops.rss?t=recent&c=2"),
+    ("Video Games",    "https://camelcamelcamel.com/top_drops.rss?t=recent&c=11"),
 ]
 
 SLICKDEALS_SEARCHES = [
