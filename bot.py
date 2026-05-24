@@ -40,6 +40,7 @@ def get_config(key, default=None):
     except FileNotFoundError:
         return default
 
+DISCORD_TOKEN    = get_config("DISCORD_TOKEN")
 CHANNEL_IDS = [
     int(cid.strip())
     for cid in get_config("CHANNEL_ID", "0").split(",")
