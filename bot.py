@@ -302,19 +302,35 @@ async def scrape_amazon_deals() -> list[dict]:
                         if deal_id in found:
                             continue
 
-                        # Use first non-empty line as title
-                        lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
-                        title = lines[0] if lines else ""
-                        if not title or not is_gaming_item(title):
-                            continue
-
-                        # Extract discount % from raw text
+                        # Extract discount % first
                         discount_pct = extract_discount(raw_text)
                         if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                             continue
 
-                        # Extract prices
-                        prices = [float(x) for x in re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", raw_text) if float(x) > 0]
+                        # Find title — skip short lines, % lines, price lines, label lines
+                        skip_patterns = re.compile(
+                            r"^\d+%|^\$|^List|^Limited|^Deal|^Save|^\d+$|^\.|\s*off\s*$",
+                            re.IGNORECASE
+                        )
+                        lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+                        title = ""
+                        for line in lines:
+                            if len(line) > 15 and not skip_patterns.match(line):
+                                title = line
+                                break
+
+                        if not title or not is_gaming_item(title):
+                            continue
+
+                        # Extract prices — lowest is sale price, highest is original
+                        prices = []
+                        for x in re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", raw_text):
+                            try:
+                                val = float(x)
+                                if val > 0:
+                                    prices.append(val)
+                            except ValueError:
+                                pass
                         price = min(prices) if prices else 0.0
                         orig  = max(prices) if len(prices) > 1 else 0.0
 
