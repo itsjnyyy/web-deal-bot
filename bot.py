@@ -240,7 +240,7 @@ async def scrape_amazon_deals() -> list[dict]:
                 timezone_id="America/New_York",
             )
             page = await context.new_page()
-            page.on("console", lambda msg: log.info(f"  BROWSER: {msg.text[:200]}") if any(x in msg.text for x in ["CARD_", "Deal-"]) else None)
+            page.on("console", lambda msg: log.info(f"  BROWSER: {msg.text[:300]}") if any(x in msg.text for x in ["CARD_", "PAGE_", "COUNTS"]) else None)
             await Stealth().apply_stealth_async(page)
 
             # Visit homepage first to look human
@@ -276,26 +276,33 @@ async def scrape_amazon_deals() -> list[dict]:
                     cards = await page.evaluate("""
                         () => {
                             const results = [];
+
+                            // Dump page info for debugging
+                            const allDataComponents = [...new Set([...document.querySelectorAll('[data-component-type]')].map(e => e.getAttribute('data-component-type')))];
+                            const allDataAsins = document.querySelectorAll('[data-asin]').length;
+                            const dcl = document.querySelectorAll('.dcl-product-detail').length;
+                            console.log('PAGE_INFO: data-component-types=' + allDataComponents.slice(0,10).join(',') + ' data-asins=' + allDataAsins + ' dcl=' + dcl);
+
+                            // Try every possible card selector
                             const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
                             const searchCards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
-                            const cards = dealCards.length > 0 ? dealCards : searchCards;
-                            console.log('COUNTS: deal=' + dealCards.length + ' search=' + searchCards.length);
+                            const asinCards = [...document.querySelectorAll('[data-asin]:not([data-asin=""])')]
+                                .filter(el => el.querySelector('a[href*="/dp/"]') && el.querySelector('.a-price'));
+
+                            console.log('CARD_COUNTS: deal=' + dealCards.length + ' search=' + searchCards.length + ' asin=' + asinCards.length);
+
+                            const cards = dealCards.length > 0 ? dealCards :
+                                         searchCards.length > 0 ? searchCards : asinCards;
+
                             cards.forEach((card) => {
                                 try {
-                                    // Search result cards have data-asin directly
                                     let link = '';
                                     const asinAttr = card.getAttribute('data-asin');
                                     if (asinAttr) {
                                         link = 'https://www.amazon.com/dp/' + asinAttr;
                                     } else {
-                                        let node = card;
-                                        for (let i = 0; i < 5; i++) {
-                                            if (!node) break;
-                                            if (node.tagName === 'A' && node.href) { link = node.href; break; }
-                                            const a = node.querySelector('a[href*="/dp/"]') || node.querySelector('a[href]');
-                                            if (a) { link = a.href; break; }
-                                            node = node.parentElement;
-                                        }
+                                        const a = card.querySelector('a[href*="/dp/"]') || card.querySelector('a[href]');
+                                        if (a) link = a.href;
                                     }
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
