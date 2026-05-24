@@ -1,6 +1,6 @@
 # 🎮 Amazon Gaming Deal Monitor — Discord Bot
 
-Monitors **Slickdeals** for name-brand gaming component deals and posts a Discord embed whenever one drops your set minimum percentage off. Completely free to run — no API keys or paid subscriptions required.
+Monitors Amazon for name-brand gaming component deals and posts a Discord embed whenever one meets your minimum discount threshold. Completely free to run — no API keys or paid subscriptions required.
 
 ---
 
@@ -8,31 +8,41 @@ Monitors **Slickdeals** for name-brand gaming component deals and posts a Discor
 
 ```
 Every 2 hours:
-  Slickdeals RSS feeds  ──►  filter by gaming brand  ──►  filter by discount %
-              │
-              └──► new deal found  ──►  Discord embed posted to all channels
-                                   ──►  SQLite (prevents duplicate alerts)
+  Playwright (stealth browser)
+    ├── Amazon featured deals page
+    ├── Amazon Goldbox
+    └── 12 brand/category searches (Logitech, Razer, Corsair, ASUS ROG, etc.)
+                │
+                └── filter by gaming brand/keyword + discount %
+                            │
+  Slickdeals RSS (60+ search terms, backup)
+                            │
+                            └── new deal found ──► Discord embed ──► SQLite (dedup)
 ```
 
-- **Slickdeals RSS** is scraped for 16 gaming search terms — works reliably from cloud servers unlike scraping Amazon directly
-- **50+ brand keywords** ensure only name-brand items get posted
-- **SQLite** tracks every alert so you never see the same deal twice (unless the price drops 5%+ further)
-- **Multiple channels** supported — post to as many servers as you want
+- **Playwright stealth** loads Amazon pages like a real browser, bypassing bot detection
+- **Brand searches** query Amazon directly for discounted items by brand — catches regular sale items, not just featured deals
+- **Slickdeals RSS** runs as a backup across 60+ search terms to catch anything Playwright misses
+- **SQLite** tracks every alert — auto scans skip deals already posted today, manual `/check` skips exact duplicates only
 
 ---
 
-## Brands monitored
+## Brands & categories monitored
 
-| Category | Brands |
+| Category | Brands / Keywords |
 |---|---|
-| Peripherals | Logitech, Razer, Corsair, SteelSeries, HyperX, Roccat, Glorious, Ducky, Keychron, Elgato, Astro, Sennheiser |
-| GPUs | EVGA, Zotac, Sapphire, XFX, PowerColor, MSI, Gigabyte, ASUS ROG/TUF/Dual/Prime, RTX, GTX, RX 6/7, GeForce, Radeon |
-| Monitors | LG Ultragear, BenQ, AOC, ViewSonic, Alienware, Samsung Odyssey, Acer Predator, Acer Nitro, HP Omen |
-| Storage | WD Black, Seagate, Crucial, Kingston, Samsung 970/980/990 |
-| Memory | G.Skill, Corsair Vengeance, Kingston Fury |
+| Peripherals | Logitech G, Razer, Corsair, SteelSeries, HyperX, Roccat, Glorious, Ducky, Keychron |
+| GPUs | EVGA, Zotac, Sapphire, XFX, PowerColor, MSI, Gigabyte, ASUS ROG/TUF, RTX, RX series, GeForce, Radeon |
+| Monitors | LG Ultragear, BenQ, AOC, ViewSonic, Alienware, Samsung Odyssey, Acer Predator, HP Omen |
+| Storage | WD Black, Seagate FireCuda, Crucial, Kingston Fury, Samsung 970/980/990 |
+| Memory | G.Skill, Corsair Vengeance, Kingston Fury, DDR4/DDR5 |
 | Cases & Cooling | NZXT, Cooler Master, Thermaltake, be quiet!, Fractal Design, Lian Li, Phanteks, Deepcool |
 | CPUs | AMD Ryzen, Intel Core, ASRock |
-| Headsets | SteelSeries Arctis, Razer BlackShark, Corsair Virtuoso, HyperX Cloud, Logitech G Pro |
+| Headsets | SteelSeries Arctis, Razer BlackShark, Corsair Virtuoso, HyperX Cloud, Astro A50/A40/A30, Turtle Beach |
+| Controllers | DualSense, Xbox Elite, 8BitDo, SCUF, Victrix, Backbone, PowerA |
+| Steering Wheels | Logitech G29/G920/G923, Thrustmaster, Fanatec, Moza Racing, Simagic |
+| Laptops | ASUS ROG, Razer Blade, MSI, Alienware, Acer Predator, Lenovo Legion |
+| Capture/Streaming | Elgato, AVerMedia |
 
 ---
 
@@ -68,7 +78,7 @@ Every 2 hours:
 | `MIN_DISCOUNT_PERCENT` | Minimum % off to alert on (default: `40`) |
 | `CHECK_INTERVAL_HOURS` | How often to scan in hours (default: `2`) |
 
-Railway auto-redeploys on every variable change or code push.
+Railway auto-redeploys whenever you change a variable or push new code. After changing a variable, restart the deployment for it to take effect.
 
 ### Step 4 — Add to more servers
 
@@ -90,23 +100,25 @@ Invite the bot to another server using the OAuth2 URL from Step 1, then append t
 
 All settings are Railway environment variables:
 
-- **Change discount threshold** → update `MIN_DISCOUNT_PERCENT` (e.g. `25` for more deals, `50` for fewer)
+- **Change discount threshold** → update `MIN_DISCOUNT_PERCENT` (e.g. `25` for more deals, `50` for fewer). Restart Railway after changing.
 - **Scan more/less often** → update `CHECK_INTERVAL_HOURS`
 - **Add a channel** → append its ID to `CHANNEL_ID` with a comma
 
-After changing any variable, restart the Railway deployment for it to take effect.
-
 ---
 
-## Adding/removing brands
+## Customizing brands and searches
 
-Edit the `GAMING_BRANDS` list in `bot.py`. Brands are matched as case-insensitive substrings — `"samsung"` matches any title containing Samsung. Push to GitHub and Railway auto-redeploys.
+**Add/remove brands** — edit `GAMING_BRANDS` in `bot.py`. Brands are matched as case-insensitive substrings.
 
----
+**Add/remove Slickdeals search terms** — edit `SLICKDEALS_SEARCHES` in `bot.py`.
 
-## Adding/removing search terms
+**Add/remove Amazon brand searches** — edit `amazon_urls` in the `scrape_amazon_deals()` function. The URL format is:
+```
+https://www.amazon.com/s?k=BRAND+KEYWORD&rh=p_n_pct-off-with-tax%3A2250765011
+```
+The `p_n_pct-off-with-tax` filter tells Amazon to only return discounted items.
 
-Edit the `SLICKDEALS_SEARCHES` list in `bot.py` to control what categories get searched on Slickdeals. Each term maps to one RSS feed query.
+Push to GitHub after any changes and Railway auto-redeploys.
 
 ---
 
@@ -117,11 +129,23 @@ Edit the `SLICKDEALS_SEARCHES` list in `bot.py` to control what categories get s
 💰 Sale Price    📦 Was         💸 You Save
   $27.49           ~~$59.99~~     $32.50
 
-🛒 View Deal
-  Slickdeals
+📈 Price History          🛒 Buy Now
+  CamelCamelCamel          View on Amazon
 
-Amazon Gaming Deals via Slickdeals  •  Every 2h  •  Min 25% off
+Via Amazon  •  Every 2h  •  Min 10% off
 ```
+
+---
+
+## Discord rich presence
+
+The bot's status updates dynamically:
+
+| State | Status | Activity |
+|---|---|---|
+| Idle | 🟢 Online | `Watching for deals \| 42 tracked 💸` |
+| Scanning | 🟡 Idle | `Watching for gaming deals 🔍` |
+| Deal found | 🟢 Online | `Playing 3 deal(s) just dropped 🔥` (30s then reverts) |
 
 ---
 
@@ -129,9 +153,10 @@ Amazon Gaming Deals via Slickdeals  •  Every 2h  •  Min 25% off
 
 ```
 amazon-deal-bot/
-  bot.py              — Main bot (Slickdeals scraper, Discord embeds, slash commands)
-  requirements.txt    — Python dependencies (discord.py, requests)
+  bot.py              — Main bot (Playwright scraper, Slickdeals RSS, Discord embeds, slash commands)
+  requirements.txt    — Python dependencies (discord.py, playwright, playwright-stealth, requests)
   Procfile            — Railway startup command
+  nixpacks.toml       — Railway build config (installs Chromium at build time)
   config.example.json — Local config template (copy to config.json for local use)
   .gitignore          — Keeps config.json and deals_seen.db out of git
 ```
@@ -144,5 +169,6 @@ amazon-deal-bot/
 cp config.example.json config.json
 # Edit config.json with your real tokens
 pip install -r requirements.txt
+playwright install chromium
 python bot.py
 ```
