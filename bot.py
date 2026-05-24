@@ -51,27 +51,38 @@ CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
 # ── Slickdeals search terms ───────────────────────────────────────────────────
 SLICKDEALS_SEARCHES = [
-    # PC components & peripherals
-    "gaming monitor", "gaming keyboard", "gaming mouse", "gaming headset",
-    "graphics card", "GPU", "gaming laptop", "SSD", "RAM DDR",
-    "gaming chair", "CPU processor", "PC case",
-    "mechanical keyboard", "wireless mouse", "gaming microphone",
-    # Console controllers
-    "PS5 controller", "PlayStation controller", "DualSense",
-    "Xbox controller", "Xbox Series controller",
-    "Nintendo Switch controller", "Switch Pro controller",
-    "gaming controller wireless",
+    # PC peripherals — broad
+    "gaming mouse", "gaming keyboard", "gaming headset", "gaming monitor",
+    "mechanical keyboard", "wireless gaming mouse", "gaming microphone",
+    "gaming webcam", "USB hub gaming", "gaming mousepad",
+    # PC components
+    "graphics card", "GPU RTX", "GPU RX", "GeForce", "Radeon",
+    "SSD NVMe", "SSD Samsung", "SSD WD", "DDR5 RAM", "DDR4 RAM",
+    "CPU AMD", "CPU Intel", "PC case ATX", "CPU cooler", "AIO cooler",
+    "gaming laptop", "gaming PC",
+    # Monitors
+    "gaming monitor 144hz", "gaming monitor 165hz", "gaming monitor 240hz",
+    "curved gaming monitor", "4K gaming monitor", "ultrawide monitor",
+    # Brands — direct searches pick up more deals
+    "Logitech G", "Razer gaming", "Corsair gaming", "SteelSeries",
+    "HyperX gaming", "ASUS ROG", "MSI gaming", "Alienware",
+    "Samsung gaming", "LG gaming", "BenQ gaming",
+    # Controllers
+    "PS5 controller", "DualSense", "Xbox controller", "Xbox Elite",
+    "Switch Pro controller", "8BitDo controller", "SCUF controller",
     # Steering wheels & sim racing
-    "racing wheel", "steering wheel PC", "Logitech G wheel",
-    "Thrustmaster wheel", "Fanatec wheel", "sim racing pedals",
-    "racing simulator", "force feedback wheel",
-    # Console headsets
-    "PS5 headset", "PlayStation headset", "Xbox headset",
-    "Nintendo Switch headset", "console gaming headset",
-    "wireless gaming headset",
-    # Console accessories
-    "PS5 accessories", "Xbox accessories", "Nintendo Switch accessories",
-    "capture card", "gaming webcam",
+    "racing wheel", "Logitech G29", "Logitech G923", "Thrustmaster",
+    "Fanatec", "sim racing", "force feedback wheel",
+    # Headsets
+    "wireless headset gaming", "PS5 headset", "Xbox headset",
+    "Astro headset", "Turtle Beach", "SteelSeries Arctis",
+    # Cases & cooling
+    "NZXT case", "Lian Li case", "Fractal Design", "gaming case",
+    "Corsair case", "Phanteks",
+    # Storage
+    "WD Black SSD", "Seagate gaming", "Samsung 990", "Samsung 980",
+    # Capture & streaming
+    "capture card", "Elgato", "AVerMedia",
 ]
 
 # ── Gaming brand filter ───────────────────────────────────────────────────────
@@ -204,27 +215,54 @@ async def scrape_amazon_deals() -> list[dict]:
                 if not title or not link:
                     continue
                 if not is_gaming_brand(title):
-                    continue
+                    # Still allow if title contains strong gaming keywords even without brand
+                    gaming_keywords = ["gaming", "mechanical keyboard", "gpu", "graphics card",
+                                       "geforce", "radeon", "nvme ssd", "ddr5", "ddr4",
+                                       "controller", "racing wheel", "capture card"]
+                    if not any(k in title.lower() for k in gaming_keywords):
+                        continue
 
                 # Parse discount % from title or description
                 discount_pct = None
-                for text in [title, desc]:
-                    match = re.search(r"(\d+)\s*%\s*off", text, re.IGNORECASE)
+                combined = title + " " + desc
+
+                # Match "X% off", "X% discount", "save X%"
+                for pattern in [
+                    r"(\d+)\s*%\s*off",
+                    r"(\d+)\s*%\s*discount",
+                    r"save\s+(\d+)\s*%",
+                    r"-(\d+)%",
+                ]:
+                    match = re.search(pattern, combined, re.IGNORECASE)
                     if match:
                         discount_pct = int(match.group(1))
                         break
 
-                # Try calculating from prices e.g. "$29.99 (reg $59.99)"
+                # Try calculating from prices — handle multiple formats
+                # e.g. "$29.99 (reg $59.99)", "was $59.99 now $29.99", "$59.99 -> $29.99"
                 if discount_pct is None:
-                    prices = re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", title + " " + desc)
-                    if len(prices) >= 2:
+                    prices = re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", combined)
+                    numeric_prices = []
+                    for p in prices:
                         try:
-                            sale = float(prices[0])
-                            orig = float(prices[1])
-                            if orig > sale > 0:
-                                discount_pct = round((1 - sale / orig) * 100)
+                            val = float(p)
+                            if val > 0:
+                                numeric_prices.append(val)
                         except ValueError:
                             pass
+                    # Try all pairs — find the biggest discount
+                    best = None
+                    for i in range(len(numeric_prices)):
+                        for j in range(len(numeric_prices)):
+                            if i == j:
+                                continue
+                            sale = numeric_prices[i]
+                            orig = numeric_prices[j]
+                            if orig > sale > 0:
+                                pct = round((1 - sale / orig) * 100)
+                                if best is None or pct > best:
+                                    best = pct
+                    discount_pct = best
 
                 if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                     continue
