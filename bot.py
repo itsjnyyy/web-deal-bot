@@ -236,11 +236,8 @@ async def scrape_amazon_deals() -> list[dict]:
                             }
                             cards.forEach((card, idx) => {
                                 try {
-                                    const allText = card.innerText || '';
-
-                                    // Link: check card itself, parent chain, or any descendant
+                                    // Get link by walking parent chain
                                     let link = '';
-                                    // Check parents up 5 levels for an anchor or ASIN
                                     let node = card;
                                     for (let i = 0; i < 5; i++) {
                                         if (!node) break;
@@ -252,32 +249,37 @@ async def scrape_amazon_deals() -> list[dict]:
                                         node = node.parentElement;
                                     }
 
-                                    // Also try data attributes for ASIN
-                                    if (!link) {
-                                        node = card;
-                                        for (let i = 0; i < 5; i++) {
+                                    // Get image + alt text (often contains product title)
+                                    const imgEl = card.querySelector('img');
+                                    const img = imgEl ? imgEl.src : '';
+                                    const imgAlt = imgEl ? (imgEl.alt || imgEl.getAttribute('aria-label') || '') : '';
+
+                                    // Get aria-label from card or parent (sometimes has full title)
+                                    let ariaLabel = card.getAttribute('aria-label') || '';
+                                    if (!ariaLabel) {
+                                        node = card.parentElement;
+                                        for (let i = 0; i < 4; i++) {
                                             if (!node) break;
-                                            const asin = node.getAttribute('data-asin') ||
-                                                         node.getAttribute('data-csa-c-element-id') ||
-                                                         node.getAttribute('data-deal-id');
-                                            if (asin && /^[A-Z0-9]{10}$/.test(asin)) {
-                                                link = 'https://www.amazon.com/dp/' + asin;
-                                                break;
-                                            }
+                                            ariaLabel = node.getAttribute('aria-label') || '';
+                                            if (ariaLabel) break;
                                             node = node.parentElement;
                                         }
                                     }
 
+                                    // Get all text including hidden spans
+                                    const allText = card.innerText || '';
+
                                     if (idx < 2) {
                                         console.log('CARD_LINK_' + idx + ': ' + link);
-                                        console.log('CARD_TEXT_' + idx + ': ' + allText.slice(0, 300));
+                                        console.log('CARD_ALT_' + idx + ': ' + imgAlt.slice(0, 200));
+                                        console.log('CARD_ARIA_' + idx + ': ' + ariaLabel.slice(0, 200));
+                                        console.log('CARD_TEXT_' + idx + ': ' + allText.slice(0, 200));
                                     }
-
-                                    const imgEl = card.querySelector('img');
-                                    const img = imgEl ? imgEl.src : '';
 
                                     results.push({
                                         rawText: allText,
+                                        imgAlt: imgAlt,
+                                        ariaLabel: ariaLabel,
                                         link: link,
                                         img: img,
                                     });
@@ -307,17 +309,21 @@ async def scrape_amazon_deals() -> list[dict]:
                         if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                             continue
 
-                        # Find title — skip short lines, % lines, price lines, label lines
-                        skip_patterns = re.compile(
-                            r"^\d+%|^\$|^List|^Limited|^Deal|^Save|^\d+$|^\.|\s*off\s*$",
-                            re.IGNORECASE
-                        )
-                        lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+                        aria  = item.get("ariaLabel", "").strip()
+                        alt   = item.get("imgAlt", "").strip()
+                        skip_patterns = re.compile(r"^[0-9]+%|^[$]|^List|^Limited|^Deal|^Save|^[0-9]+$|off$", re.IGNORECASE)
                         title = ""
-                        for line in lines:
-                            if len(line) > 15 and not skip_patterns.match(line):
-                                title = line
+                        # Try aria-label first, then alt, then parse from raw text
+                        for candidate in [aria, alt]:
+                            if candidate and len(candidate) > 10 and not skip_patterns.match(candidate):
+                                title = candidate
                                 break
+                        if not title:
+                            lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+                            for line in lines:
+                                if len(line) > 15 and not skip_patterns.match(line):
+                                    title = line
+                                    break
 
                         if not title or not is_gaming_item(title):
                             continue
