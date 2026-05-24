@@ -49,40 +49,27 @@ CHANNEL_IDS = [
 MIN_DISCOUNT_PCT = int(get_config("MIN_DISCOUNT_PERCENT", 40))
 CHECK_HOURS      = int(get_config("CHECK_INTERVAL_HOURS", 2))
 
-# ── Slickdeals search terms ───────────────────────────────────────────────────
+# ── CamelCamelCamel category RSS feeds (primary — direct Amazon price drops) ───
+# These show the biggest Amazon price drops per category updated throughout the day
+CAMEL_FEEDS = [
+    ("Electronics",    "https://camelcamelcamel.com/top_drops/electronics/xml"),
+    ("Computers",      "https://camelcamelcamel.com/top_drops/computers/xml"),
+    ("Video Games",    "https://camelcamelcamel.com/top_drops/video_games/xml"),
+    ("Camera & Photo", "https://camelcamelcamel.com/top_drops/camera/xml"),
+    ("PC Gaming",      "https://camelcamelcamel.com/top_drops/pc/xml"),
+]
+
+# ── Slickdeals search terms (backup — community curated) ──────────────────────
 SLICKDEALS_SEARCHES = [
-    # PC peripherals — broad
     "gaming mouse", "gaming keyboard", "gaming headset", "gaming monitor",
-    "mechanical keyboard", "wireless gaming mouse", "gaming microphone",
-    "gaming webcam", "USB hub gaming", "gaming mousepad",
-    # PC components
-    "graphics card", "GPU RTX", "GPU RX", "GeForce", "Radeon",
-    "SSD NVMe", "SSD Samsung", "SSD WD", "DDR5 RAM", "DDR4 RAM",
-    "CPU AMD", "CPU Intel", "PC case ATX", "CPU cooler", "AIO cooler",
-    "gaming laptop", "gaming PC",
-    # Monitors
-    "gaming monitor 144hz", "gaming monitor 165hz", "gaming monitor 240hz",
-    "curved gaming monitor", "4K gaming monitor", "ultrawide monitor",
-    # Brands — direct searches pick up more deals
-    "Logitech G", "Razer gaming", "Corsair gaming", "SteelSeries",
-    "HyperX gaming", "ASUS ROG", "MSI gaming", "Alienware",
-    "Samsung gaming", "LG gaming", "BenQ gaming",
-    # Controllers
-    "PS5 controller", "DualSense", "Xbox controller", "Xbox Elite",
-    "Switch Pro controller", "8BitDo controller", "SCUF controller",
-    # Steering wheels & sim racing
-    "racing wheel", "Logitech G29", "Logitech G923", "Thrustmaster",
-    "Fanatec", "sim racing", "force feedback wheel",
-    # Headsets
-    "wireless headset gaming", "PS5 headset", "Xbox headset",
-    "Astro headset", "Turtle Beach", "SteelSeries Arctis",
-    # Cases & cooling
-    "NZXT case", "Lian Li case", "Fractal Design", "gaming case",
-    "Corsair case", "Phanteks",
-    # Storage
-    "WD Black SSD", "Seagate gaming", "Samsung 990", "Samsung 980",
-    # Capture & streaming
-    "capture card", "Elgato", "AVerMedia",
+    "graphics card", "GPU RTX", "GPU RX", "SSD NVMe", "DDR5 RAM", "DDR4 RAM",
+    "gaming laptop", "Logitech G", "Razer gaming", "Corsair gaming",
+    "ASUS ROG", "MSI gaming", "PS5 controller", "DualSense",
+    "Xbox controller", "Xbox Elite", "Switch Pro controller", "8BitDo",
+    "racing wheel", "Thrustmaster", "Fanatec", "Logitech G29", "Logitech G923",
+    "PS5 headset", "Xbox headset", "Turtle Beach", "SteelSeries Arctis",
+    "capture card", "Elgato", "AVerMedia", "NZXT", "Lian Li",
+    "Samsung 990 SSD", "WD Black SSD",
 ]
 
 # ── Gaming brand filter ───────────────────────────────────────────────────────
@@ -321,10 +308,11 @@ def build_embed(deal: dict) -> discord.Embed:
         embed.add_field(name="📦 Was",        value=f"~~${orig:.2f}~~",        inline=True)
     if price > 0 and orig > 0:
         embed.add_field(name="💸 You Save",   value=f"**${orig - price:.2f}**", inline=True)
-    embed.add_field(name="🛒 View Deal", value=f"[Slickdeals]({deal['url']})", inline=True)
+    embed.add_field(name="🛒 Buy Now", value=f"[View on Amazon]({deal['url']})", inline=True)
     if deal.get("image_url"):
         embed.set_thumbnail(url=deal["image_url"])
-    embed.set_footer(text=f"Amazon Gaming Deals via Slickdeals  •  Every {CHECK_HOURS}h  •  Min {MIN_DISCOUNT_PCT}% off")
+    source = deal.get("source", "Slickdeals")
+    embed.set_footer(text=f"Via {source}  •  Every {CHECK_HOURS}h  •  Min {MIN_DISCOUNT_PCT}% off")
     return embed
 
 # ── Core scan ─────────────────────────────────────────────────────────────────
