@@ -355,10 +355,7 @@ async def slash_check(interaction: discord.Interaction):
             await interaction.followup.send(
                 f"😴 No new deals found right now that are ≥ **{MIN_DISCOUNT_PCT}% off** from a name brand. Try again later!"
             )
-        else:
-            await interaction.followup.send(
-                f"✅ Done! Found and posted **{posted}** new deal(s) above."
-            )
+        # If deals were found they're already posted to the channel — no followup needed
     except Exception as e:
         log.error(f"/check error: {e}")
         await interaction.followup.send(f"❌ Something went wrong during the scan: `{e}`")
