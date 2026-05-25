@@ -292,7 +292,6 @@ async def scrape_amazon_deals() -> list[dict]:
                                 .filter(el => el.getAttribute('data-asin') && el.querySelector('.a-price'));
 
                             const cards = dealCards.length > 0 ? dealCards : searchCards;
-                            }
 
                             cards.forEach((card) => {
                                 try {
