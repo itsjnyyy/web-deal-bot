@@ -686,8 +686,8 @@ async def on_ready():
         channel = bot.get_channel(cid)
         if channel:
             await channel.send(
-                f"🤖 **Amazon Gaming Deal Monitor online!**\n"
-                f"Scanning Amazon every **{CHECK_HOURS}h** for name-brand items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
+                f"🤖 **Gaming Deal Monitor online!**\n"
+                f"Scanning **Amazon, Best Buy & Newegg** every **{CHECK_HOURS}h** for name-brand items ≥ **{MIN_DISCOUNT_PCT}% off**.\n"
                 f"Use `/check` to scan now, `/stats` to see tracked deals."
             )
 
