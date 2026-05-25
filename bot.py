@@ -231,21 +231,12 @@ async def scrape_amazon_deals() -> list[dict]:
         # Featured deals pages
         "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22viewIndex%22%3A0%2C%22presetId%22%3A%22deals-collection-all-deals%22%2C%22sorting%22%3A%22BY_SCORE%22%7D",
         "https://www.amazon.com/gp/goldbox",
-        # Brand searches filtered to discounted items only
+        # Top brand searches — most impactful, kept short to stay under 3 min total
         "https://www.amazon.com/s?k=logitech+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
         "https://www.amazon.com/s?k=razer+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=corsair+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=asus+rog&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=steelseries&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=hyperx+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=msi+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=gaming+monitor&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=graphics+card+rtx&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=gaming+headset&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=racing+wheel+gaming&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=nvme+ssd&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=gaming+keyboard+mechanical&rh=p_n_pct-off-with-tax%3A2250765011",
-        "https://www.amazon.com/s?k=gaming+mouse+wireless&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=gaming+monitor+sale&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=gaming+headset+sale&rh=p_n_pct-off-with-tax%3A2250765011",
+        "https://www.amazon.com/s?k=graphics+card+sale&rh=p_n_pct-off-with-tax%3A2250765011",
     ]
     try:
         async with async_playwright() as p:
@@ -268,11 +259,11 @@ async def scrape_amazon_deals() -> list[dict]:
                 try:
                     log.info(f"  Playwright: {url[:60]}...")
                     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    await page.wait_for_timeout(5000)
+                    await page.wait_for_timeout(3000)
                     # Scroll to trigger lazy loading of deal cards
-                    for _ in range(5):
+                    for _ in range(2):
                         await page.evaluate("window.scrollBy(0, 1200)")
-                        await page.wait_for_timeout(1500)
+                        await page.wait_for_timeout(1000)
                     await page.wait_for_timeout(2000)
                     # Wait specifically for deal cards to appear
                     try:
