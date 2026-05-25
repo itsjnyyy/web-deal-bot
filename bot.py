@@ -328,21 +328,36 @@ async def scrape_amazon_deals() -> list[dict]:
                         if deal_id in found:
                             continue
 
-                        # Extract discount % first
-                        discount_pct = extract_discount(raw_text)
-                        if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
+                        # Get title from URL slug first — filter early
+                        url_title_m = re.search(r"amazon.com/([^/]+)/dp/[A-Z0-9]{10}", link)
+                        title = url_title_m.group(1).replace("-", " ").strip() if url_title_m else ""
+                        if not title or not is_gaming_item(title):
                             continue
 
-                        # Extract title from URL slug — Amazon puts it there even when
-                        # it's stripped from the card HTML
-                        # e.g. /Traeger-TFB57PZBO-Bronze-Pellet-Grill/dp/B07GLK1NC2
-                        url_title_m = re.search(r"amazon\.com/([^/]+)/dp/[A-Z0-9]{10}", link)
-                        if url_title_m:
-                            title = url_title_m.group(1).replace("-", " ").strip()
-                        else:
-                            title = ""
+                        # Log first gaming item raw text to debug discount parsing
+                        if not getattr(scrape_amazon_deals, "_logged", False):
+                            log.info(f"  SAMPLE_TITLE: {title[:60]}")
+                            log.info(f"  SAMPLE_TEXT: {repr(raw_text[:400])}")
+                            scrape_amazon_deals._logged = True
 
-                        if not title or not is_gaming_item(title):
+                        # Extract discount % — Amazon search shows as "15% off", "-15%", or "(15%)"
+                        discount_pct = extract_discount(raw_text)
+                        if discount_pct is None:
+                            m = re.search(r"[(](\d+)[%][)]", raw_text)
+                            if m:
+                                discount_pct = int(m.group(1))
+                        if discount_pct is None:
+                            p2 = []
+                            for x in re.findall(r"[$]([0-9]+(?:[.][0-9]{2})?)", raw_text):
+                                try:
+                                    v = float(x)
+                                    if v > 0: p2.append(v)
+                                except ValueError: pass
+                            if len(p2) >= 2:
+                                s, o = min(p2), max(p2)
+                                if o > s > 0:
+                                    discount_pct = round((1 - s / o) * 100)
+                        if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                             continue
 
                         # Extract prices — lowest is sale price, highest is original
