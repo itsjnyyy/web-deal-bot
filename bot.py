@@ -106,6 +106,23 @@ SLICKDEALS_SEARCHES = [
     "Alienware laptop", "Acer Predator laptop", "Lenovo Legion laptop",
 ]
 
+# ── Best Buy & Newegg RSS deal feeds ─────────────────────────────────────────
+BESTBUY_SEARCHES = [
+    "gaming mouse", "gaming keyboard", "gaming headset", "gaming monitor",
+    "graphics card", "gaming laptop", "SSD", "gaming controller",
+    "racing wheel", "mechanical keyboard", "CPU processor",
+    "Logitech", "Razer", "Corsair", "SteelSeries", "HyperX",
+    "ASUS ROG", "MSI gaming", "Alienware", "Samsung gaming",
+]
+
+NEWEGG_SEARCHES = [
+    "gaming mouse", "gaming keyboard", "gaming headset", "gaming monitor",
+    "graphics card RTX", "graphics card RX", "NVMe SSD", "DDR5 RAM",
+    "gaming laptop", "PC case gaming", "CPU AMD", "CPU Intel",
+    "Logitech", "Razer", "Corsair", "ASUS ROG", "MSI",
+    "mechanical keyboard", "racing wheel", "gaming controller",
+]
+
 # ── Gaming brand + keyword filter ─────────────────────────────────────────────
 GAMING_BRANDS = [
     "logitech", "razer", "corsair", "steelseries", "hyperx", "roccat",
@@ -401,7 +418,14 @@ async def scrape_amazon_deals() -> list[dict]:
             combined = title + " " + desc
             discount_pct = extract_discount(combined)
             if discount_pct is None:
-                prices = [float(x) for x in re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", combined) if float(x) > 0]
+                prices = []
+                for x in re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", combined):
+                    try:
+                        val = float(x)
+                        if val > 0:
+                            prices.append(val)
+                    except ValueError:
+                        pass
                 best = None
                 for i in range(len(prices)):
                     for j in range(len(prices)):
@@ -412,21 +436,38 @@ async def scrape_amazon_deals() -> list[dict]:
                 discount_pct = best
             if discount_pct is None or discount_pct < MIN_DISCOUNT_PCT:
                 continue
-            prices = re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", combined)
-            try:
-                price = float(prices[0]) if prices else 0.0
-                orig  = float(prices[1]) if len(prices) > 1 else 0.0
-            except (ValueError, IndexError):
-                price, orig = 0.0, 0.0
+            prices = []
+            for x in re.findall(r"\$([0-9]+(?:\.[0-9]{2})?)", combined):
+                try:
+                    val = float(x)
+                    if val > 0:
+                        prices.append(val)
+                except ValueError:
+                    pass
+            price = min(prices) if prices else 0.0
+            orig  = max(prices) if len(prices) > 1 else 0.0
+            # Build deal ID from ASIN (Amazon), SKU (Best Buy), or itemNumber (Newegg)
             asin_m = re.search(r"/dp/([A-Z0-9]{10})|/product/([A-Z0-9]{10})", link)
-            deal_id = (asin_m.group(1) or asin_m.group(2)) if asin_m else re.sub(r"[^\w]", "", link[-40:])
+            bb_m   = re.search(r"skuId=(\d+)", link)
+            ne_m   = re.search(r"/p/([A-Z0-9\-]+)", link)
+            if asin_m:
+                deal_id  = asin_m.group(1) or asin_m.group(2)
+                deal_url = f"https://www.amazon.com/dp/{deal_id}"
+            elif bb_m:
+                deal_id  = f"bb_{bb_m.group(1)}"
+                deal_url = link
+            elif ne_m:
+                deal_id  = f"ne_{ne_m.group(1)}"
+                deal_url = link
+            else:
+                deal_id  = re.sub(r"[^\w]", "", link[-40:])
+                deal_url = link
             if deal_id in found:
                 continue
             found[deal_id] = {
                 "deal_id": deal_id, "title": title, "price": price,
                 "orig": orig, "discount_pct": discount_pct,
-                "url": f"https://www.amazon.com/dp/{deal_id}" if asin_m else link,
-                "image_url": "", "source": source,
+                "url": deal_url, "image_url": "", "source": source,
             }
             log.info(f"  ✓ [{source}] {discount_pct}% off — {title[:55]}")
 
@@ -440,6 +481,34 @@ async def scrape_amazon_deals() -> list[dict]:
             parse_rss(items, "Slickdeals")
         except Exception as e:
             log.warning(f"  Slickdeals ('{search}'): {e}")
+
+    # ── Best Buy RSS ──────────────────────────────────────────────────────────
+    for search in BESTBUY_SEARCHES:
+        try:
+            url = f"https://www.bestbuy.com/site/searchpage.jsp?st={urllib.parse.quote(search)}&cp=1&_dyncharset=UTF-8&id=pcat17071&type=page&sc=Global&usc=All+Categories&ks=960&keys=keys&iht=n&rss=true"
+            xml_data = await loop.run_in_executor(None, fetch_url, url)
+            root = ET.fromstring(xml_data)
+            ch = root.find("channel")
+            items = ch.findall("item") if ch is not None else []
+            if items:
+                log.info(f"  Best Buy '{search}': {len(items)} items")
+            parse_rss(items, "Best Buy")
+        except Exception as e:
+            log.warning(f"  Best Buy ('{search}'): {e}")
+
+    # ── Newegg RSS ────────────────────────────────────────────────────────────
+    for search in NEWEGG_SEARCHES:
+        try:
+            url = f"https://www.newegg.com/p/pl?d={urllib.parse.quote(search)}&N=4131%204017&Order=1&PageSize=36&rss=1"
+            xml_data = await loop.run_in_executor(None, fetch_url, url)
+            root = ET.fromstring(xml_data)
+            ch = root.find("channel")
+            items = ch.findall("item") if ch is not None else []
+            if items:
+                log.info(f"  Newegg '{search}': {len(items)} items")
+            parse_rss(items, "Newegg")
+        except Exception as e:
+            log.warning(f"  Newegg ('{search}'): {e}")
 
     log.info(f"Scrape complete — {len(found)} qualifying deal(s) total.")
     return list(found.values())
