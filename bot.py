@@ -248,7 +248,6 @@ async def scrape_amazon_deals() -> list[dict]:
                 timezone_id="America/New_York",
             )
             page = await context.new_page()
-            page.on("console", lambda msg: log.info(f"  BROWSER: {msg.text[:300]}") if any(x in msg.text for x in ["CARD_", "PAGE_", "COUNTS"]) else None)
             await Stealth().apply_stealth_async(page)
 
             # Visit homepage first to look human
@@ -293,14 +292,6 @@ async def scrape_amazon_deals() -> list[dict]:
                                 .filter(el => el.getAttribute('data-asin') && el.querySelector('.a-price'));
 
                             const cards = dealCards.length > 0 ? dealCards : searchCards;
-
-                            // Debug: log first card's full structure
-                            if (cards.length > 0) {
-                                const c = cards[0];
-                                const allLinks = [...c.querySelectorAll('a[href]')].map(a => a.href).slice(0,3);
-                                console.log('FIRST_CARD_LINKS: ' + allLinks.join(' | '));
-                                console.log('FIRST_CARD_ASIN: ' + c.getAttribute('data-asin'));
-                                console.log('FIRST_CARD_TEXT: ' + c.innerText.slice(0,200));
                             }
 
                             cards.forEach((card) => {
