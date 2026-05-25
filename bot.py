@@ -300,8 +300,9 @@ async def scrape_amazon_deals() -> list[dict]:
 
                             cards.forEach((card) => {
                                 try {
-                                    const asin = card.getAttribute('data-asin');
-                                    const link = asin ? 'https://www.amazon.com/dp/' + asin : '';
+                                    // Prefer full href with slug (has product name) over data-asin
+                                    const linkEl = card.querySelector('a[href*="/dp/"]');
+                                    const link = linkEl ? linkEl.href : '';
                                     if (!link) return;
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
