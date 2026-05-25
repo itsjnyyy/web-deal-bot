@@ -305,26 +305,13 @@ async def scrape_amazon_deals() -> list[dict]:
 
                             cards.forEach((card) => {
                                 try {
-                                    // Try to get link with product slug, fall back to data-asin
-                                    let link = '';
-                                    const anchors = [...card.querySelectorAll('a[href]')];
-                                    for (const a of anchors) {
-                                        if (a.href.includes('/dp/') && !a.href.includes('ref=sr_1_1_sspa')) {
-                                            link = a.href;
-                                            break;
-                                        }
-                                    }
-                                    // Fallback: construct from data-asin
-                                    if (!link) {
-                                        const asin = card.getAttribute('data-asin');
-                                        if (asin) link = 'https://www.amazon.com/dp/' + asin;
-                                    }
-                                    if (!link) return;
-
+                                    const asin = card.getAttribute('data-asin');
+                                    if (!asin) return;
+                                    const link = 'https://www.amazon.com/dp/' + asin;
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
                                     const allText = card.innerText || '';
-                                    results.push({ rawText: allText, link: link, img: img });
+                                    results.push({ rawText: allText, link: link, asin: asin, img: img });
                                 } catch(e) {}
                             });
                             return results;
@@ -346,17 +333,18 @@ async def scrape_amazon_deals() -> list[dict]:
                         if deal_id in found:
                             continue
 
-                        # Get title from URL slug first — filter early
-                        url_title_m = re.search(r"amazon.com/([^/]+)/dp/[A-Z0-9]{10}", link)
-                        title = url_title_m.group(1).replace("-", " ").strip() if url_title_m else ""
+                        # For search pages, innerText starts with the full product title
+                        # Find the first long non-price line as the title
+                        # Find the longest line in the first 3 lines as the title
+                        lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+                        title = ""
+                        skip = re.compile(r"^[+\d]|^\$|^Save|^List|^Limited|^Deal|^New!", re.IGNORECASE)
+                        for line in lines[:8]:
+                            if len(line) > 20 and not skip.match(line):
+                                title = line
+                                break
                         if not title or not is_gaming_item(title):
                             continue
-
-                        # Log first gaming item raw text to debug discount parsing
-                        if not getattr(scrape_amazon_deals, "_logged", False):
-                            log.info(f"  SAMPLE_TITLE: {title[:60]}")
-                            log.info(f"  SAMPLE_TEXT: {repr(raw_text[:400])}")
-                            scrape_amazon_deals._logged = True
 
                         # Extract discount % — Amazon search shows as "15% off", "-15%", or "(15%)"
                         discount_pct = extract_discount(raw_text)
