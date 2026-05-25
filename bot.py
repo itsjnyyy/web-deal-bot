@@ -294,33 +294,24 @@ async def scrape_amazon_deals() -> list[dict]:
                         () => {
                             const results = [];
 
-                            // Dump page info for debugging
-                            const allDataComponents = [...new Set([...document.querySelectorAll('[data-component-type]')].map(e => e.getAttribute('data-component-type')))];
-                            const allDataAsins = document.querySelectorAll('[data-asin]').length;
-                            const dcl = document.querySelectorAll('.dcl-product-detail').length;
-                            console.log('PAGE_INFO: data-component-types=' + allDataComponents.slice(0,10).join(',') + ' data-asins=' + allDataAsins + ' dcl=' + dcl);
-
-                            // Try every possible card selector
+                            // Amazon deals page uses dcl-product-detail
+                            // Amazon search uses s-search-results container with [data-asin] children
                             const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
-                            const searchCards = [...document.querySelectorAll('[data-component-type="s-search-result"]')];
-                            const asinCards = [...document.querySelectorAll('[data-asin]:not([data-asin=""])')]
-                                .filter(el => el.querySelector('a[href*="/dp/"]') && el.querySelector('.a-price'));
 
-                            console.log('CARD_COUNTS: deal=' + dealCards.length + ' search=' + searchCards.length + ' asin=' + asinCards.length);
+                            // For search pages: find the results container then get data-asin items
+                            const searchContainer = document.querySelector('[data-component-type="s-search-results"]');
+                            const searchCards = searchContainer
+                                ? [...searchContainer.querySelectorAll('[data-asin]:not([data-asin=""])')]
+                                    .filter(el => el.tagName === 'DIV' && el.querySelector('.a-price'))
+                                : [];
 
-                            const cards = dealCards.length > 0 ? dealCards :
-                                         searchCards.length > 0 ? searchCards : asinCards;
+                            const cards = dealCards.length > 0 ? dealCards : searchCards;
 
                             cards.forEach((card) => {
                                 try {
-                                    let link = '';
-                                    const asinAttr = card.getAttribute('data-asin');
-                                    if (asinAttr) {
-                                        link = 'https://www.amazon.com/dp/' + asinAttr;
-                                    } else {
-                                        const a = card.querySelector('a[href*="/dp/"]') || card.querySelector('a[href]');
-                                        if (a) link = a.href;
-                                    }
+                                    const asin = card.getAttribute('data-asin');
+                                    const link = asin ? 'https://www.amazon.com/dp/' + asin : '';
+                                    if (!link) return;
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
                                     const allText = card.innerText || '';
