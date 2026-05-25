@@ -464,33 +464,30 @@ async def scrape_amazon_deals() -> list[dict]:
         except Exception as e:
             log.warning(f"  Slickdeals ('{search}'): {e}")
 
-    # ── Best Buy RSS ──────────────────────────────────────────────────────────
+    # ── Best Buy via Slickdeals ───────────────────────────────────────────────
+    # Best Buy and Newegg deals get posted to Slickdeals regularly
+    # Use targeted searches to find them
     for search in BESTBUY_SEARCHES:
         try:
-            url = f"https://www.bestbuy.com/site/searchpage.jsp?st={urllib.parse.quote(search)}&cp=1&_dyncharset=UTF-8&id=pcat17071&type=page&sc=Global&usc=All+Categories&ks=960&keys=keys&iht=n&rss=true"
+            url = f"https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&q={urllib.parse.quote('best buy ' + search)}&rss=1"
             xml_data = await loop.run_in_executor(None, fetch_url, url)
             root = ET.fromstring(xml_data)
             ch = root.find("channel")
             items = ch.findall("item") if ch is not None else []
-            if items:
-                log.info(f"  Best Buy '{search}': {len(items)} items")
             parse_rss(items, "Best Buy")
         except Exception as e:
-            log.warning(f"  Best Buy ('{search}'): {e}")
+            log.warning(f"  Best Buy/Slickdeals ('{search}'): {e}")
 
-    # ── Newegg RSS ────────────────────────────────────────────────────────────
     for search in NEWEGG_SEARCHES:
         try:
-            url = f"https://www.newegg.com/p/pl?d={urllib.parse.quote(search)}&N=4131%204017&Order=1&PageSize=36&rss=1"
+            url = f"https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&q={urllib.parse.quote('newegg ' + search)}&rss=1"
             xml_data = await loop.run_in_executor(None, fetch_url, url)
             root = ET.fromstring(xml_data)
             ch = root.find("channel")
             items = ch.findall("item") if ch is not None else []
-            if items:
-                log.info(f"  Newegg '{search}': {len(items)} items")
             parse_rss(items, "Newegg")
         except Exception as e:
-            log.warning(f"  Newegg ('{search}'): {e}")
+            log.warning(f"  Newegg/Slickdeals ('{search}'): {e}")
 
     log.info(f"Scrape complete — {len(found)} qualifying deal(s) total.")
     return list(found.values())
