@@ -1,6 +1,6 @@
-# 🎮 Amazon Gaming Deal Monitor — Discord Bot
+# 🎮 Gaming Deal Monitor — Discord Bot
 
-Monitors Amazon for name-brand gaming component deals and posts a Discord embed whenever one meets your minimum discount threshold. Completely free to run — no API keys or paid subscriptions required.
+Monitors **Amazon, Best Buy, and Newegg** for name-brand gaming component deals and posts a Discord embed whenever one meets your minimum discount threshold. Completely free to run — no API keys or paid subscriptions required.
 
 ---
 
@@ -8,22 +8,40 @@ Monitors Amazon for name-brand gaming component deals and posts a Discord embed 
 
 ```
 Every 2 hours:
-  Playwright (stealth browser)
-    ├── Amazon featured deals page
-    ├── Amazon Goldbox
-    └── 12 brand/category searches (Logitech, Razer, Corsair, ASUS ROG, etc.)
-                │
-                └── filter by gaming brand/keyword + discount %
-                            │
-  Slickdeals RSS (60+ search terms, backup)
-                            │
-                            └── new deal found ──► Discord embed ──► SQLite (dedup)
+  ┌─ Playwright (stealth browser) ──────────────────────────────────┐
+  │  • Amazon featured deals page + Goldbox                         │
+  │  • Amazon brand searches (Logitech, Razer, monitors, etc.)      │
+  │  → Finds deals directly from Amazon product listings            │
+  └─────────────────────────────────────────────────────────────────┘
+  ┌─ Slickdeals RSS (60+ search terms) ─────────────────────────────┐
+  │  • General gaming searches (gaming mouse, GPU, headset, etc.)   │
+  │  • Brand searches (Corsair, ASUS ROG, SteelSeries, etc.)        │
+  │  • Best Buy deals (searches "best buy [product]")               │
+  │  • Newegg deals (searches "newegg [product]")                   │
+  │  → Community-curated deals from Amazon, Best Buy & Newegg       │
+  └─────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+        filter by gaming brand/keyword + discount %
+                    │
+                    ▼
+        new deal → Discord embed → SQLite (dedup)
 ```
 
 - **Playwright stealth** loads Amazon pages like a real browser, bypassing bot detection
-- **Brand searches** query Amazon directly for discounted items by brand — catches regular sale items, not just featured deals
-- **Slickdeals RSS** runs as a backup across 60+ search terms to catch anything Playwright misses
-- **SQLite** tracks every alert — auto scans skip deals already posted today, manual `/check` skips exact duplicates only
+- **Slickdeals RSS** catches Best Buy and Newegg deals that community members post
+- **Smart dedup** — auto scans skip deals already posted today; manual `/check` skips exact duplicates only
+- **Multiple channels** — post to as many Discord servers as you want
+
+---
+
+## Sources monitored
+
+| Source | Method | What it catches |
+|---|---|---|
+| Amazon | Playwright stealth browser | Featured deals + brand search discounts |
+| Best Buy | Slickdeals RSS | Community-posted Best Buy gaming deals |
+| Newegg | Slickdeals RSS | Community-posted Newegg gaming deals |
 
 ---
 
@@ -78,7 +96,7 @@ Every 2 hours:
 | `MIN_DISCOUNT_PERCENT` | Minimum % off to alert on (default: `40`) |
 | `CHECK_INTERVAL_HOURS` | How often to scan in hours (default: `2`) |
 
-Railway auto-redeploys whenever you change a variable or push new code. After changing a variable, restart the deployment for it to take effect.
+Railway auto-redeploys whenever you change a variable or push new code. Restart the deployment after changing a variable for it to take effect.
 
 ### Step 4 — Add to more servers
 
@@ -90,7 +108,7 @@ Invite the bot to another server using the OAuth2 URL from Step 1, then append t
 
 | Command | Description |
 |---|---|
-| `/check` | Force an immediate deal scan |
+| `/check` | Force an immediate scan across all sources |
 | `/stats` | Show total deals tracked + 5 most recent |
 | `/help` | Show available commands |
 
@@ -112,11 +130,10 @@ All settings are Railway environment variables:
 
 **Add/remove Slickdeals search terms** — edit `SLICKDEALS_SEARCHES` in `bot.py`.
 
-**Add/remove Amazon brand searches** — edit `amazon_urls` in the `scrape_amazon_deals()` function. The URL format is:
+**Add/remove Amazon brand searches** — edit `amazon_urls` in `scrape_amazon_deals()`. Format:
 ```
 https://www.amazon.com/s?k=BRAND+KEYWORD&rh=p_n_pct-off-with-tax%3A2250765011
 ```
-The `p_n_pct-off-with-tax` filter tells Amazon to only return discounted items.
 
 Push to GitHub after any changes and Railway auto-redeploys.
 
@@ -125,9 +142,9 @@ Push to GitHub after any changes and Railway auto-redeploys.
 ## What a deal alert looks like
 
 ```
-🔥🔥 55% OFF — Razer DeathAdder V3 HyperSpeed Wireless Gaming Mouse
+🔥🔥 33% OFF — Logitech G502 Lightspeed Wireless Gaming Mouse
 💰 Sale Price    📦 Was         💸 You Save
-  $27.49           ~~$59.99~~     $32.50
+  $79.99           ~~$119.99~~    $40.00
 
 📈 Price History          🛒 Buy Now
   CamelCamelCamel          View on Amazon
@@ -145,7 +162,7 @@ The bot's status updates dynamically:
 |---|---|---|
 | Idle | 🟢 Online | `Watching for deals \| 42 tracked 💸` |
 | Scanning | 🟡 Idle | `Watching for gaming deals 🔍` |
-| Deal found | 🟢 Online | `Playing 3 deal(s) just dropped 🔥` (30s then reverts) |
+| Deal found | 🟢 Online | `Playing 3 deal(s) just dropped 🔥` (30s, then reverts) |
 
 ---
 

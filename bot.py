@@ -629,7 +629,7 @@ bot = DealBot()
 # ── Slash commands ────────────────────────────────────────────────────────────
 @bot.tree.command(name="check", description="Force an immediate deal scan")
 async def slash_check(interaction: discord.Interaction):
-    await interaction.response.send_message("🔍 Scanning Amazon for deals, this may take a minute...")
+    await interaction.response.send_message("🔍 Scanning Amazon, Best Buy & Newegg for gaming deals, this may take a minute...")
     try:
         posted = await run_scan(manual=True)
         if posted == 0:
