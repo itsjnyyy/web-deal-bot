@@ -285,25 +285,42 @@ async def scrape_amazon_deals() -> list[dict]:
                         () => {
                             const results = [];
 
-                            // Amazon deals page uses dcl-product-detail
-                            // Amazon search uses s-search-results container with [data-asin] children
+                            // Deals page
                             const dealCards = [...document.querySelectorAll('.dcl-product-detail')];
 
-                            // For search pages: find the results container then get data-asin items
-                            const searchContainer = document.querySelector('[data-component-type="s-search-results"]');
-                            const searchCards = searchContainer
-                                ? [...searchContainer.querySelectorAll('[data-asin]:not([data-asin=""])')]
-                                    .filter(el => el.tagName === 'DIV' && el.querySelector('.a-price'))
-                                : [];
+                            // Search page — find all divs with data-asin that have a price
+                            const searchCards = [...document.querySelectorAll('div[data-asin]')]
+                                .filter(el => el.getAttribute('data-asin') && el.querySelector('.a-price'));
 
                             const cards = dealCards.length > 0 ? dealCards : searchCards;
 
+                            // Debug: log first card's full structure
+                            if (cards.length > 0) {
+                                const c = cards[0];
+                                const allLinks = [...c.querySelectorAll('a[href]')].map(a => a.href).slice(0,3);
+                                console.log('FIRST_CARD_LINKS: ' + allLinks.join(' | '));
+                                console.log('FIRST_CARD_ASIN: ' + c.getAttribute('data-asin'));
+                                console.log('FIRST_CARD_TEXT: ' + c.innerText.slice(0,200));
+                            }
+
                             cards.forEach((card) => {
                                 try {
-                                    // Prefer full href with slug (has product name) over data-asin
-                                    const linkEl = card.querySelector('a[href*="/dp/"]');
-                                    const link = linkEl ? linkEl.href : '';
+                                    // Try to get link with product slug, fall back to data-asin
+                                    let link = '';
+                                    const anchors = [...card.querySelectorAll('a[href]')];
+                                    for (const a of anchors) {
+                                        if (a.href.includes('/dp/') && !a.href.includes('ref=sr_1_1_sspa')) {
+                                            link = a.href;
+                                            break;
+                                        }
+                                    }
+                                    // Fallback: construct from data-asin
+                                    if (!link) {
+                                        const asin = card.getAttribute('data-asin');
+                                        if (asin) link = 'https://www.amazon.com/dp/' + asin;
+                                    }
                                     if (!link) return;
+
                                     const imgEl = card.querySelector('img');
                                     const img = imgEl ? imgEl.src : '';
                                     const allText = card.innerText || '';
