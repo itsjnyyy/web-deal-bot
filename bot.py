@@ -147,15 +147,10 @@ GAMING_BRANDS = [
     "razer kaira", "avermedia",
 ]
 
-GAMING_KEYWORDS = [
-    "gaming", "mechanical keyboard", "gpu", "graphics card", "geforce",
-    "radeon", "nvme ssd", "ddr5", "ddr4", "controller", "racing wheel",
-    "capture card", "144hz", "165hz", "240hz",
-]
-
 def is_gaming_item(title: str) -> bool:
+    """Only pass items from recognized name brands — no generic keyword fallback."""
     t = title.lower()
-    return any(b in t for b in GAMING_BRANDS) or any(k in t for k in GAMING_KEYWORDS)
+    return any(b in t for b in GAMING_BRANDS)
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_FILE = "deals_seen.db"
