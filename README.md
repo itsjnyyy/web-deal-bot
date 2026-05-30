@@ -126,7 +126,7 @@ All settings are Railway environment variables:
 
 ## Customizing brands and searches
 
-**Add/remove brands** — edit `GAMING_BRANDS` in `bot.py`. Brands are matched as case-insensitive substrings.
+**Add/remove brands** — edit `GAMING_BRANDS` in `bot.py`. Brands are matched as case-insensitive substrings. Only items matching a brand in this list will be posted — there is no generic keyword fallback, so off-brand items are always filtered out.
 
 **Add/remove Slickdeals search terms** — edit `SLICKDEALS_SEARCHES` in `bot.py`.
 
